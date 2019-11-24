@@ -1,19 +1,14 @@
-/*
+/* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2013-2015 Brocade Communications Systems, Inc.
- *
- * Copyright (c) 2015 QLogic Corporation.
+ * Copyright (c) 2015-2018 Cavium Inc.
  * All rights reserved.
- * www.qlogic.com
- *
- * See LICENSE.bnx2x_pmd for copyright and licensing details.
+ * www.cavium.com
  */
 
 #ifndef _BNX2X_RXTX_H_
 #define _BNX2X_RXTX_H_
 
-
-#define DEFAULT_RX_FREE_THRESH   0
-#define DEFAULT_TX_FREE_THRESH   512
+#define DEFAULT_TX_FREE_THRESH   64
 #define RTE_PMD_BNX2X_TX_MAX_BURST 1
 
 /**
@@ -42,13 +37,9 @@ struct bnx2x_rx_queue {
 	uint16_t                   rx_bd_tail;           /**< Index of last rx bd. */
 	uint16_t                   rx_cq_head;           /**< Index of current rcq bd. */
 	uint16_t                   rx_cq_tail;           /**< Index of last rcq bd. */
-	uint16_t                   nb_rx_hold;           /**< number of held free RX desc. */
-	uint16_t                   rx_free_thresh;       /**< max free RX desc to hold. */
 	uint16_t                   queue_id;             /**< RX queue index. */
-	uint8_t                    port_id;              /**< Device port identifier. */
-	uint8_t                    crc_len;              /**< 0 if CRC stripped, 4 otherwise. */
+	uint16_t                   port_id;              /**< Device port identifier. */
 	struct bnx2x_softc           *sc;                  /**< Ptr to dev_private data. */
-	uint64_t                   rx_mbuf_alloc;        /**< Number of allocated mbufs. */
 };
 
 /**
@@ -68,7 +59,7 @@ struct bnx2x_tx_queue {
 	uint16_t                   nb_tx_avail;          /**< Number of TX descriptors available. */
 	uint16_t                   nb_tx_pages;          /**< number of TX pages */
 	uint16_t                   queue_id;             /**< TX queue index. */
-	uint8_t                    port_id;              /**< Device port identifier. */
+	uint16_t                   port_id;              /**< Device port identifier. */
 	struct bnx2x_softc           *sc;                  /**< Ptr to dev_private data */
 };
 
@@ -83,7 +74,8 @@ int bnx2x_dev_tx_queue_setup(struct rte_eth_dev *dev, uint16_t tx_queue_id,
 
 void bnx2x_dev_rx_queue_release(void *rxq);
 void bnx2x_dev_tx_queue_release(void *txq);
-int bnx2x_dev_rx_init(struct rte_eth_dev *dev);
+void bnx2x_dev_rxtx_init(struct rte_eth_dev *dev);
+void bnx2x_dev_rxtx_init_dummy(struct rte_eth_dev *dev);
 void bnx2x_dev_clear_queues(struct rte_eth_dev *dev);
 
 #endif /* _BNX2X_RXTX_H_ */

@@ -1,4 +1,4 @@
-/*-
+/* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2007-2013 Broadcom Corporation.
  *
  * Eric Davis        <edavis@broadcom.com>
@@ -6,17 +6,18 @@
  * Gary Zambrano     <zambrano@broadcom.com>
  *
  * Copyright (c) 2013-2015 Brocade Communications Systems, Inc.
- * Copyright (c) 2015 QLogic Corporation.
+ * Copyright (c) 2015-2018 Cavium Inc.
  * All rights reserved.
- * www.qlogic.com
- *
- * See LICENSE.bnx2x_pmd for copyright and licensing details.
+ * www.cavium.com
  */
 
 #ifndef __BNX2X_H__
 #define __BNX2X_H__
 
 #include <rte_byteorder.h>
+#include <rte_spinlock.h>
+#include <rte_bus_pci.h>
+#include <rte_io.h>
 
 #if RTE_BYTE_ORDER == RTE_LITTLE_ENDIAN
 #ifndef __LITTLE_ENDIAN
@@ -118,6 +119,8 @@ int bnx2x_ilog2(int x)
 #define ilog2(x) bnx2x_ilog2(x)
 #endif
 
+#define BNX2X_BC_VER		0x040200
+
 #include "ecore_sp.h"
 
 struct bnx2x_device_type {
@@ -152,13 +155,14 @@ struct bnx2x_device_type {
  * Transmit Buffer Descriptor (tx_bd) definitions*
  */
 /* NUM_TX_PAGES must be a power of 2. */
+#define NUM_TX_PAGES		 16
 #define TOTAL_TX_BD_PER_PAGE     (BNX2X_PAGE_SIZE / sizeof(union eth_tx_bd_types)) /*  256 */
 #define USABLE_TX_BD_PER_PAGE    (TOTAL_TX_BD_PER_PAGE - 1)                      /*  255 */
 
 #define TOTAL_TX_BD(q)           (TOTAL_TX_BD_PER_PAGE * q->nb_tx_pages)         /*  512 */
 #define USABLE_TX_BD(q)          (USABLE_TX_BD_PER_PAGE * q->nb_tx_pages)        /*  510 */
 #define MAX_TX_BD(q)             (TOTAL_TX_BD(q) - 1)                            /*  511 */
-
+#define MAX_TX_AVAIL		 (USABLE_TX_BD_PER_PAGE * NUM_TX_PAGES - 2)
 #define NEXT_TX_BD(x)                                                   \
 	((((x) & USABLE_TX_BD_PER_PAGE) ==                              \
 	  (USABLE_TX_BD_PER_PAGE - 1)) ? (x) + 2 : (x) + 1)
@@ -179,13 +183,14 @@ struct bnx2x_device_type {
 /*
  * Receive Buffer Descriptor (rx_bd) definitions*
  */
-//#define NUM_RX_PAGES            1
+#define MAX_RX_PAGES            8
 #define TOTAL_RX_BD_PER_PAGE    (BNX2X_PAGE_SIZE / sizeof(struct eth_rx_bd))      /*  512 */
 #define USABLE_RX_BD_PER_PAGE   (TOTAL_RX_BD_PER_PAGE - 2)                      /*  510 */
 #define RX_BD_PER_PAGE_MASK     (TOTAL_RX_BD_PER_PAGE - 1)                      /*  511 */
 #define TOTAL_RX_BD(q)          (TOTAL_RX_BD_PER_PAGE * q->nb_rx_pages)         /*  512 */
 #define USABLE_RX_BD(q)         (USABLE_RX_BD_PER_PAGE * q->nb_rx_pages)        /*  510 */
 #define MAX_RX_BD(q)            (TOTAL_RX_BD(q) - 1)                            /*  511 */
+#define MAX_RX_AVAIL		(USABLE_RX_BD_PER_PAGE * MAX_RX_PAGES - 2)
 #define RX_BD_NEXT_PAGE_DESC_CNT 2
 
 #define NEXT_RX_BD(x)                                                   \
@@ -240,6 +245,10 @@ struct bnx2x_device_type {
 	(BD_TH_LO(sc) + DROPLESS_FC_HEADROOM)
 #define MIN_RX_AVAIL(sc)				\
 	((sc)->dropless_fc ? BD_TH_HI(sc) + 128 : 128)
+
+#define MIN_RX_SIZE_NONTPA_HW	ETH_MIN_RX_CQES_WITHOUT_TPA
+#define MIN_RX_SIZE_NONTPA	(RTE_MAX((uint32_t)MIN_RX_SIZE_NONTPA_HW,\
+					(uint32_t)MIN_RX_AVAIL(sc)))
 
 /*
  * dropless fc calculations for RCQs
@@ -304,10 +313,7 @@ struct bnx2x_device_type {
 /* TCP with Timestamp Option (32) + IPv6 (40) */
 
 /* max supported alignment is 256 (8 shift) */
-#define BNX2X_RX_ALIGN_SHIFT 8
-/* FW uses 2 cache lines alignment for start packet and size  */
-#define BNX2X_FW_RX_ALIGN_START (1 << BNX2X_RX_ALIGN_SHIFT)
-#define BNX2X_FW_RX_ALIGN_END   (1 << BNX2X_RX_ALIGN_SHIFT)
+#define BNX2X_RX_ALIGN_SHIFT	RTE_MAX(6, min(8, RTE_CACHE_LINE_SIZE_LOG2))
 
 #define BNX2X_PXP_DRAM_ALIGN (BNX2X_RX_ALIGN_SHIFT - 5)
 
@@ -318,9 +324,10 @@ struct bnx2x_bar {
 /* Used to manage DMA allocations. */
 struct bnx2x_dma {
 	struct bnx2x_softc        *sc;
-	phys_addr_t             paddr;
+	rte_iova_t              paddr;
 	void                    *vaddr;
 	int                     nseg;
+	const void		*mzone;
 	char                    msg[RTE_MEMZONE_NAMESIZE - 6];
 };
 
@@ -371,10 +378,10 @@ struct bnx2x_fastpath {
 	struct bnx2x_dma                 sb_dma;
 	union bnx2x_host_hc_status_block status_block;
 
-	phys_addr_t tx_desc_mapping;
+	rte_iova_t tx_desc_mapping;
 
-	phys_addr_t rx_desc_mapping;
-	phys_addr_t rx_comp_mapping;
+	rte_iova_t rx_desc_mapping;
+	rte_iova_t rx_comp_mapping;
 
 	uint16_t *sb_index_values;
 	uint16_t *sb_running_index;
@@ -469,7 +476,7 @@ union cdu_context {
 struct hw_context {
     struct bnx2x_dma    vcxt_dma;
     union cdu_context *vcxt;
-    //phys_addr_t        cxt_mapping;
+    //rte_iova_t        cxt_mapping;
     size_t            size;
 };
 
@@ -727,6 +734,13 @@ struct bnx2x_port {
 
     uint32_t    phy_addr;
 
+	/* Used to synchronize phy accesses. */
+	rte_spinlock_t	phy_mtx;
+	char		phy_mtx_name[32];
+
+#define BNX2X_PHY_LOCK(sc)          rte_spinlock_lock(&sc->port.phy_mtx)
+#define BNX2X_PHY_UNLOCK(sc)        rte_spinlock_unlock(&sc->port.phy_mtx)
+
     /*
      * MCP scratchpad address for port specific statistics.
      * The device is responsible for writing statistcss
@@ -805,6 +819,10 @@ struct bnx2x_mf_info {
 
 /* Device information data structure. */
 struct bnx2x_devinfo {
+#if 1
+#define NAME_SIZE 128
+	char name[NAME_SIZE];
+#endif
 	/* PCIe info */
 	uint16_t vendor_id;
 	uint16_t device_id;
@@ -822,6 +840,7 @@ struct bnx2x_devinfo {
 #define CHIP_ID(sc)           ((sc)->devinfo.chip_id & 0xffff0000)
 #define CHIP_NUM(sc)          ((sc)->devinfo.chip_id >> 16)
 /* device ids */
+#define CHIP_NUM_57710        0x164e
 #define CHIP_NUM_57711        0x164f
 #define CHIP_NUM_57711E       0x1650
 #define CHIP_NUM_57712        0x1662
@@ -863,6 +882,8 @@ struct bnx2x_devinfo {
 #define CHIP_METAL(sc)      ((sc->devinfo.chip_id) & 0x00000ff0)
 #define CHIP_BOND_ID(sc)    ((sc->devinfo.chip_id) & 0x0000000f)
 
+#define CHIP_IS_E1(sc)      (CHIP_NUM(sc) == CHIP_NUM_57710)
+#define CHIP_IS_57710(sc)   (CHIP_NUM(sc) == CHIP_NUM_57710)
 #define CHIP_IS_57711(sc)   (CHIP_NUM(sc) == CHIP_NUM_57711)
 #define CHIP_IS_57711E(sc)  (CHIP_NUM(sc) == CHIP_NUM_57711E)
 #define CHIP_IS_E1H(sc)     ((CHIP_IS_57711(sc)) || \
@@ -1031,12 +1052,13 @@ struct bnx2x_softc {
 	struct bnx2x_mac_ops mac_ops;
 
 	/* structures for VF mbox/response/bulletin */
-	struct bnx2x_vf_mbx_msg	*vf2pf_mbox;
-	struct bnx2x_dma		vf2pf_mbox_mapping;
-	struct vf_acquire_resp_tlv acquire_resp;
+	struct bnx2x_vf_mbx_msg		*vf2pf_mbox;
+	struct bnx2x_dma		 vf2pf_mbox_mapping;
+	struct vf_acquire_resp_tlv	 acquire_resp;
 	struct bnx2x_vf_bulletin	*pf2vf_bulletin;
-	struct bnx2x_dma		pf2vf_bulletin_mapping;
-	struct bnx2x_vf_bulletin	old_bulletin;
+	struct bnx2x_dma		 pf2vf_bulletin_mapping;
+	struct bnx2x_vf_bulletin	 old_bulletin;
+	rte_spinlock_t			 vf2pf_lock;
 
 	int             media;
 
@@ -1076,7 +1098,7 @@ struct bnx2x_softc {
 #define PERIODIC_STOP 0
 #define PERIODIC_GO   1
 	volatile unsigned long periodic_flags;
-
+	rte_atomic32_t	scan_fp;
 	struct bnx2x_fastpath fp[MAX_RSS_CHAINS];
 	struct bnx2x_sp_objs  sp_objs[MAX_RSS_CHAINS];
 
@@ -1147,11 +1169,12 @@ struct bnx2x_softc {
 #define BNX2X_RECOVERY_NIC_LOADING 5
 
 	uint32_t rx_mode;
-#define BNX2X_RX_MODE_NONE     0
-#define BNX2X_RX_MODE_NORMAL   1
-#define BNX2X_RX_MODE_ALLMULTI 2
-#define BNX2X_RX_MODE_PROMISC  3
-#define BNX2X_MAX_MULTICAST    64
+#define BNX2X_RX_MODE_NONE             0
+#define BNX2X_RX_MODE_NORMAL           1
+#define BNX2X_RX_MODE_ALLMULTI         2
+#define BNX2X_RX_MODE_ALLMULTI_PROMISC 3
+#define BNX2X_RX_MODE_PROMISC          4
+#define BNX2X_MAX_MULTICAST            64
 
 	struct bnx2x_port port;
 
@@ -1241,7 +1264,7 @@ struct bnx2x_softc {
 	uint32_t       gz_outlen;
 #define GUNZIP_BUF(sc)    (sc->gz_buf)
 #define GUNZIP_OUTLEN(sc) (sc->gz_outlen)
-#define GUNZIP_PHYS(sc)   (phys_addr_t)(sc->gz_buf_dma.paddr)
+#define GUNZIP_PHYS(sc)   (rte_iova_t)(sc->gz_buf_dma.paddr)
 #define FW_BUF_SIZE       0x40000
 
 	struct raw_op *init_ops;
@@ -1309,14 +1332,14 @@ struct bnx2x_softc {
 	 */
 	int                     fw_stats_req_size;
 	struct bnx2x_fw_stats_req *fw_stats_req;
-	phys_addr_t              fw_stats_req_mapping;
+	rte_iova_t              fw_stats_req_mapping;
 	/*
 	 * FW statistics data shortcut (points at the beginning of fw_stats
 	 * buffer + fw_stats_req_size).
 	 */
 	int                      fw_stats_data_size;
 	struct bnx2x_fw_stats_data *fw_stats_data;
-	phys_addr_t               fw_stats_data_mapping;
+	rte_iova_t               fw_stats_data_mapping;
 
 	/* tracking a pending STAT_QUERY ramrod */
 	uint16_t stats_pending;
@@ -1401,8 +1424,8 @@ union bnx2x_stats_show_data {
 #define FUNC_FLG_LEADING 0x0020 /* PF only */
 
 struct bnx2x_func_init_params {
-    phys_addr_t fw_stat_map; /* (dma) valid if FUNC_FLG_STATS */
-    phys_addr_t spq_map;     /* (dma) valid if FUNC_FLG_SPQ */
+    rte_iova_t fw_stat_map; /* (dma) valid if FUNC_FLG_STATS */
+    rte_iova_t spq_map;     /* (dma) valid if FUNC_FLG_SPQ */
     uint16_t   func_flgs;
     uint16_t   func_id;     /* abs function id */
     uint16_t   pf_id;
@@ -1415,33 +1438,89 @@ struct bnx2x_func_init_params {
 #define BAR1 2
 #define BAR2 4
 
+static inline void
+bnx2x_reg_write8(struct bnx2x_softc *sc, size_t offset, uint8_t val)
+{
+	PMD_DEBUG_PERIODIC_LOG(DEBUG, sc, "offset=0x%08lx val=0x%02x",
+			       (unsigned long)offset, val);
+	rte_write8(val, ((uint8_t *)sc->bar[BAR0].base_addr + offset));
+}
+
+static inline void
+bnx2x_reg_write16(struct bnx2x_softc *sc, size_t offset, uint16_t val)
+{
 #ifdef RTE_LIBRTE_BNX2X_DEBUG_PERIODIC
-uint8_t bnx2x_reg_read8(struct bnx2x_softc *sc, size_t offset);
-uint16_t bnx2x_reg_read16(struct bnx2x_softc *sc, size_t offset);
-uint32_t bnx2x_reg_read32(struct bnx2x_softc *sc, size_t offset);
-
-void bnx2x_reg_write8(struct bnx2x_softc *sc, size_t offset, uint8_t val);
-void bnx2x_reg_write16(struct bnx2x_softc *sc, size_t offset, uint16_t val);
-void bnx2x_reg_write32(struct bnx2x_softc *sc, size_t offset, uint32_t val);
-#else
-#define bnx2x_reg_write8(sc, offset, val)\
-	*((volatile uint8_t*)((uintptr_t)sc->bar[BAR0].base_addr + offset)) = val
-
-#define bnx2x_reg_write16(sc, offset, val)\
-	*((volatile uint16_t*)((uintptr_t)sc->bar[BAR0].base_addr + offset)) = val
-
-#define bnx2x_reg_write32(sc, offset, val)\
-	*((volatile uint32_t*)((uintptr_t)sc->bar[BAR0].base_addr + offset)) = val
-
-#define bnx2x_reg_read8(sc, offset)\
-	(*((volatile uint8_t*)((uintptr_t)sc->bar[BAR0].base_addr + offset)))
-
-#define bnx2x_reg_read16(sc, offset)\
-	(*((volatile uint16_t*)((uintptr_t)sc->bar[BAR0].base_addr + offset)))
-
-#define bnx2x_reg_read32(sc, offset)\
-	(*((volatile uint32_t*)((uintptr_t)sc->bar[BAR0].base_addr + offset)))
+	if ((offset % 2) != 0)
+		PMD_DRV_LOG(NOTICE, sc, "Unaligned 16-bit write to 0x%08lx",
+			    (unsigned long)offset);
 #endif
+	PMD_DEBUG_PERIODIC_LOG(DEBUG, sc, "offset=0x%08lx val=0x%04x",
+			       (unsigned long)offset, val);
+	rte_write16(val, ((uint8_t *)sc->bar[BAR0].base_addr + offset));
+
+}
+
+static inline void
+bnx2x_reg_write32(struct bnx2x_softc *sc, size_t offset, uint32_t val)
+{
+#ifdef RTE_LIBRTE_BNX2X_DEBUG_PERIODIC
+	if ((offset % 4) != 0)
+		PMD_DRV_LOG(NOTICE, sc, "Unaligned 32-bit write to 0x%08lx",
+			    (unsigned long)offset);
+#endif
+
+	PMD_DEBUG_PERIODIC_LOG(DEBUG, sc, "offset=0x%08lx val=0x%08x",
+			       (unsigned long)offset, val);
+	rte_write32(val, ((uint8_t *)sc->bar[BAR0].base_addr + offset));
+}
+
+static inline uint8_t
+bnx2x_reg_read8(struct bnx2x_softc *sc, size_t offset)
+{
+	uint8_t val;
+
+	val = rte_read8((uint8_t *)sc->bar[BAR0].base_addr + offset);
+	PMD_DEBUG_PERIODIC_LOG(DEBUG, sc, "offset=0x%08lx val=0x%02x",
+			       (unsigned long)offset, val);
+
+	return val;
+}
+
+static inline uint16_t
+bnx2x_reg_read16(struct bnx2x_softc *sc, size_t offset)
+{
+	uint16_t val;
+
+#ifdef RTE_LIBRTE_BNX2X_DEBUG_PERIODIC
+	if ((offset % 2) != 0)
+		PMD_DRV_LOG(NOTICE, sc, "Unaligned 16-bit read from 0x%08lx",
+			    (unsigned long)offset);
+#endif
+
+	val = rte_read16(((uint8_t *)sc->bar[BAR0].base_addr + offset));
+	PMD_DEBUG_PERIODIC_LOG(DEBUG, sc, "offset=0x%08lx val=0x%08x",
+			       (unsigned long)offset, val);
+
+	return val;
+}
+
+static inline uint32_t
+bnx2x_reg_read32(struct bnx2x_softc *sc, size_t offset)
+{
+	uint32_t val;
+
+#ifdef RTE_LIBRTE_BNX2X_DEBUG_PERIODIC
+	if ((offset % 4) != 0)
+		PMD_DRV_LOG(NOTICE, sc, "Unaligned 32-bit read from 0x%08lx",
+			    (unsigned long)offset);
+#endif
+
+	val = rte_read32(((uint8_t *)sc->bar[BAR0].base_addr + offset));
+	PMD_DEBUG_PERIODIC_LOG(DEBUG, sc, "offset=0x%08lx val=0x%08x",
+			       (unsigned long)offset, val);
+
+	return val;
+}
 
 #define REG_ADDR(sc, offset) (((uint64_t)sc->bar[BAR0].base_addr) + (offset))
 
@@ -1468,12 +1547,12 @@ void bnx2x_reg_write32(struct bnx2x_softc *sc, size_t offset, uint32_t val);
 #define REG_RD_DMAE(sc, offset, valp, len32)               \
     do {                                                   \
 	(void)bnx2x_read_dmae(sc, offset, len32);                  \
-	(void)rte_memcpy(valp, BNX2X_SP(sc, wb_data[0]), (len32) * 4); \
+	rte_memcpy(valp, BNX2X_SP(sc, wb_data[0]), (len32) * 4); \
     } while (0)
 
 #define REG_WR_DMAE(sc, offset, valp, len32)                            \
     do {                                                                \
-	(void)rte_memcpy(BNX2X_SP(sc, wb_data[0]), valp, (len32) * 4);              \
+	rte_memcpy(BNX2X_SP(sc, wb_data[0]), valp, (len32) * 4);              \
 	(void)bnx2x_write_dmae(sc, BNX2X_SP_MAPPING(sc, wb_data), offset, len32); \
     } while (0)
 
@@ -1500,11 +1579,9 @@ void bnx2x_reg_write32(struct bnx2x_softc *sc, size_t offset, uint32_t val);
 #define DPM_TRIGGER_TYPE 0x40
 
 /* Doorbell macro */
-#define BNX2X_DB_WRITE(db_bar, val) \
-	*((volatile uint32_t *)(db_bar)) = (val)
+#define BNX2X_DB_WRITE(db_bar, val) rte_write32_relaxed((val), (db_bar))
 
-#define BNX2X_DB_READ(db_bar) \
-	*((volatile uint32_t *)(db_bar))
+#define BNX2X_DB_READ(db_bar) rte_read32_relaxed(db_bar)
 
 #define DOORBELL_ADDR(sc, offset) \
 	(volatile uint32_t *)(((char *)(sc)->bar[BAR1].base_addr + (offset)))
@@ -1685,7 +1762,7 @@ int  bnx2x_cmpxchg(volatile int *addr, int old, int new);
 
 int bnx2x_dma_alloc(struct bnx2x_softc *sc, size_t size,
 		struct bnx2x_dma *dma, const char *msg, uint32_t align);
-
+void bnx2x_dma_free(struct bnx2x_dma *dma);
 uint32_t bnx2x_dmae_opcode_add_comp(uint32_t opcode, uint8_t comp_type);
 uint32_t bnx2x_dmae_opcode_clr_src_reset(uint32_t opcode);
 uint32_t bnx2x_dmae_opcode(struct bnx2x_softc *sc, uint8_t src_type,
@@ -1693,7 +1770,7 @@ uint32_t bnx2x_dmae_opcode(struct bnx2x_softc *sc, uint8_t src_type,
 			 uint8_t comp_type);
 void bnx2x_post_dmae(struct bnx2x_softc *sc, struct dmae_command *dmae, int idx);
 void bnx2x_read_dmae(struct bnx2x_softc *sc, uint32_t src_addr, uint32_t len32);
-void bnx2x_write_dmae(struct bnx2x_softc *sc, phys_addr_t dma_addr,
+void bnx2x_write_dmae(struct bnx2x_softc *sc, rte_iova_t dma_addr,
 		    uint32_t dst_addr, uint32_t len32);
 void bnx2x_set_ctx_validation(struct bnx2x_softc *sc, struct eth_context *cxt,
 			    uint32_t cid);
@@ -1869,11 +1946,13 @@ void bnx2x_dump_tx_chain(struct bnx2x_fastpath * fp, int bd_prod, int count);
 int bnx2x_tx_encap(struct bnx2x_tx_queue *txq, struct rte_mbuf *m0);
 uint8_t bnx2x_txeof(struct bnx2x_softc *sc, struct bnx2x_fastpath *fp);
 void bnx2x_print_adapter_info(struct bnx2x_softc *sc);
-int bnx2x_intr_legacy(struct bnx2x_softc *sc, int scan_fp);
+void bnx2x_print_device_info(struct bnx2x_softc *sc);
+int bnx2x_intr_legacy(struct bnx2x_softc *sc);
 void bnx2x_link_status_update(struct bnx2x_softc *sc);
 int bnx2x_complete_sp(struct bnx2x_softc *sc);
 int bnx2x_set_storm_rx_mode(struct bnx2x_softc *sc);
 void bnx2x_periodic_callout(struct bnx2x_softc *sc);
+void bnx2x_periodic_stop(void *param);
 
 int bnx2x_vf_get_resources(struct bnx2x_softc *sc, uint8_t tx_count, uint8_t rx_count);
 void bnx2x_vf_close(struct bnx2x_softc *sc);
@@ -1883,8 +1962,6 @@ int bnx2x_vf_setup_queue(struct bnx2x_softc *sc, struct bnx2x_fastpath *fp,
 	int leading);
 void bnx2x_free_hsi_mem(struct bnx2x_softc *sc);
 int bnx2x_vf_set_rx_mode(struct bnx2x_softc *sc);
-int bnx2x_fill_accept_flags(struct bnx2x_softc *sc, uint32_t rx_mode,
-	unsigned long *rx_accept_flags, unsigned long *tx_accept_flags);
 int bnx2x_check_bull(struct bnx2x_softc *sc);
 
 //#define BNX2X_PULSE
@@ -1917,15 +1994,15 @@ bnx2x_set_rx_mode(struct bnx2x_softc *sc)
 			bnx2x_vf_set_rx_mode(sc);
 		}
 	} else {
-		PMD_DRV_LOG(NOTICE, "Card is not ready to change mode");
+		PMD_DRV_LOG(INFO, sc, "Card is not ready to change mode");
 	}
 }
 
 static inline int pci_read(struct bnx2x_softc *sc, size_t addr,
 			   void *val, uint8_t size)
 {
-	if (rte_eal_pci_read_config(sc->pci_dev, val, size, addr) <= 0) {
-		PMD_DRV_LOG(ERR, "Can't read from PCI config space");
+	if (rte_pci_read_config(sc->pci_dev, val, size, addr) <= 0) {
+		PMD_DRV_LOG(ERR, sc, "Can't read from PCI config space");
 		return ENXIO;
 	}
 
@@ -1936,9 +2013,9 @@ static inline int pci_write_word(struct bnx2x_softc *sc, size_t addr, off_t val)
 {
 	uint16_t val16 = val;
 
-	if (rte_eal_pci_write_config(sc->pci_dev, &val16,
+	if (rte_pci_write_config(sc->pci_dev, &val16,
 				     sizeof(val16), addr) <= 0) {
-		PMD_DRV_LOG(ERR, "Can't write to PCI config space");
+		PMD_DRV_LOG(ERR, sc, "Can't write to PCI config space");
 		return ENXIO;
 	}
 
@@ -1948,9 +2025,9 @@ static inline int pci_write_word(struct bnx2x_softc *sc, size_t addr, off_t val)
 static inline int pci_write_long(struct bnx2x_softc *sc, size_t addr, off_t val)
 {
 	uint32_t val32 = val;
-	if (rte_eal_pci_write_config(sc->pci_dev, &val32,
+	if (rte_pci_write_config(sc->pci_dev, &val32,
 				     sizeof(val32), addr) <= 0) {
-		PMD_DRV_LOG(ERR, "Can't write to PCI config space");
+		PMD_DRV_LOG(ERR, sc, "Can't write to PCI config space");
 		return ENXIO;
 	}
 

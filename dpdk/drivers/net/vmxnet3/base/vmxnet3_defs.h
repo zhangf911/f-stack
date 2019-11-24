@@ -1,29 +1,6 @@
-/*********************************************************
+/* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (C) 2007 VMware, Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- *
- *********************************************************/
+ */
 
 /*
  * vmxnet3_defs.h --
@@ -109,6 +86,9 @@ typedef enum {
    VMXNET3_CMD_STOP_EMULATION,
    VMXNET3_CMD_LOAD_PLUGIN,
    VMXNET3_CMD_ACTIVATE_VF,
+   VMXNET3_CMD_RESERVED3,
+   VMXNET3_CMD_RESERVED4,
+   VMXNET3_CMD_REGISTER_MEMREGS,
 
    VMXNET3_CMD_FIRST_GET = 0xF00D0000,
    VMXNET3_CMD_GET_QUEUE_STATUS = VMXNET3_CMD_FIRST_GET,
@@ -120,7 +100,9 @@ typedef enum {
    VMXNET3_CMD_GET_DID_HI,
    VMXNET3_CMD_GET_DEV_EXTRA_INFO,
    VMXNET3_CMD_GET_CONF_INTR,
-   VMXNET3_CMD_GET_ADAPTIVE_RING_INFO
+   VMXNET3_CMD_GET_ADAPTIVE_RING_INFO,
+   VMXNET3_CMD_GET_TXDATA_DESC_SIZE,
+   VMXNET3_CMD_RESERVED5,
 } Vmxnet3_Cmd;
 
 /* Adaptive Ring Info Flags */
@@ -342,7 +324,32 @@ struct Vmxnet3_RxCompDescExt {
    uint8  segCnt;       /* Number of aggregated packets */
    uint8  dupAckCnt;    /* Number of duplicate Acks */
    __le16 tsDelta;      /* TCP timestamp difference */
-   __le32 dword2[2];
+	__le32 dword2;
+#ifdef __BIG_ENDIAN_BITFIELD
+	uint32 gen : 1;     /* generation bit */
+	uint32 type : 7;    /* completion type */
+	uint32 fcs : 1;     /* Frame CRC correct */
+	uint32 frg : 1;     /* IP Fragment */
+	uint32 v4 : 1;      /* IPv4 */
+	uint32 v6 : 1;      /* IPv6 */
+	uint32 ipc : 1;     /* IP Checksum Correct */
+	uint32 tcp : 1;     /* TCP packet */
+	uint32 udp : 1;     /* UDP packet */
+	uint32 tuc : 1;     /* TCP/UDP Checksum Correct */
+	uint32 mss : 16;
+#else
+	uint32 mss : 16;
+	uint32 tuc : 1;     /* TCP/UDP Checksum Correct */
+	uint32 udp : 1;     /* UDP packet */
+	uint32 tcp : 1;     /* TCP packet */
+	uint32 ipc : 1;     /* IP Checksum Correct */
+	uint32 v6 : 1;      /* IPv6 */
+	uint32 v4 : 1;      /* IPv4 */
+	uint32 frg : 1;     /* IP Fragment */
+	uint32 fcs : 1;     /* Frame CRC correct */
+	uint32 type : 7;    /* completion type */
+	uint32 gen : 1;     /* generation bit */
+#endif  /* __BIG_ENDIAN_BITFIELD */
 }
 #include "vmware_pack_end.h"
 Vmxnet3_RxCompDescExt;
@@ -402,11 +409,24 @@ typedef union Vmxnet3_GenericDesc {
 #define VMXNET3_RING_SIZE_ALIGN 32
 #define VMXNET3_RING_SIZE_MASK  (VMXNET3_RING_SIZE_ALIGN - 1)
 
+/* Tx Data Ring buffer size must be a multiple of 64 */
+#define VMXNET3_TXDATA_DESC_SIZE_ALIGN 64
+#define VMXNET3_TXDATA_DESC_SIZE_MASK  (VMXNET3_TXDATA_DESC_SIZE_ALIGN - 1)
+
+/* Rx Data Ring buffer size must be a multiple of 64 */
+#define VMXNET3_RXDATA_DESC_SIZE_ALIGN 64
+#define VMXNET3_RXDATA_DESC_SIZE_MASK  (VMXNET3_RXDATA_DESC_SIZE_ALIGN - 1)
+
 /* Max ring size */
 #define VMXNET3_TX_RING_MAX_SIZE   4096
 #define VMXNET3_TC_RING_MAX_SIZE   4096
 #define VMXNET3_RX_RING_MAX_SIZE   4096
 #define VMXNET3_RC_RING_MAX_SIZE   8192
+
+#define VMXNET3_TXDATA_DESC_MIN_SIZE 128
+#define VMXNET3_TXDATA_DESC_MAX_SIZE 2048
+
+#define VMXNET3_RXDATA_DESC_MAX_SIZE 2048
 
 /* a list of reasons for queue stop */
 
@@ -507,7 +527,9 @@ struct Vmxnet3_TxQueueConf {
    __le32    compRingSize; /* # of comp desc */
    __le32    ddLen;        /* size of driver data */
    uint8     intrIdx;
-   uint8     _pad[7];
+   uint8     _pad[1];
+   __le16    txDataRingDescSize;
+   uint8     _pad2[4];
 }
 #include "vmware_pack_end.h"
 Vmxnet3_TxQueueConf;
@@ -518,12 +540,14 @@ struct Vmxnet3_RxQueueConf {
    __le64    rxRingBasePA[2];
    __le64    compRingBasePA;
    __le64    ddPA;            /* driver data */
-   __le64    reserved;
+   __le64    rxDataRingBasePA;
    __le32    rxRingSize[2];   /* # of rx desc */
    __le32    compRingSize;    /* # of rx comp desc */
    __le32    ddLen;           /* size of driver data */
    uint8     intrIdx;
-   uint8     _pad[7];
+   uint8     _pad1[1];
+   __le16    rxDataRingDescSize;  /* size of rx data ring buffer */
+   uint8     _pad2[4];
 }
 #include "vmware_pack_end.h"
 Vmxnet3_RxQueueConf;
@@ -695,12 +719,65 @@ Vmxnet3_RxQueueDesc;
 
 typedef
 #include "vmware_pack_begin.h"
+struct Vmxnet3_SetPolling {
+   uint8 enablePolling;
+}
+#include "vmware_pack_end.h"
+Vmxnet3_SetPolling;
+
+typedef
+#include "vmware_pack_begin.h"
+struct Vmxnet3_MemoryRegion {
+	__le64            startPA;
+	__le32            length;
+	__le16            txQueueBits; /* bit n corresponding to tx queue n */
+	__le16            rxQueueBits; /* bit n corresponding to rx queue n */
+}
+#include "vmware_pack_end.h"
+Vmxnet3_MemoryRegion;
+
+#define MAX_MEMORY_REGION_PER_QUEUE 16
+#define MAX_MEMORY_REGION_PER_DEVICE 256
+
+typedef
+#include "vmware_pack_begin.h"
+struct Vmxnet3_MemRegs {
+	__le16           numRegs;
+	__le16           pad[3];
+	Vmxnet3_MemoryRegion memRegs[1];
+}
+#include "vmware_pack_end.h"
+Vmxnet3_MemRegs;
+
+/*
+ * If the command data <= 16 bytes, use the shared memory direcly.
+ * Otherwise, use the variable length configuration descriptor.
+ */
+typedef
+#include "vmware_pack_begin.h"
+union Vmxnet3_CmdInfo {
+   Vmxnet3_VariableLenConfDesc varConf;
+   Vmxnet3_SetPolling          setPolling;
+   __le64                      data[2];
+}
+#include "vmware_pack_end.h"
+Vmxnet3_CmdInfo;
+
+typedef
+#include "vmware_pack_begin.h"
 struct Vmxnet3_DriverShared {
    __le32               magic;
    __le32               pad; /* make devRead start at 64-bit boundaries */
    Vmxnet3_DSDevRead    devRead;
    __le32               ecr;
-   __le32               reserved[5];
+   __le32               reserved;
+
+   union {
+      __le32            reserved1[4];
+      Vmxnet3_CmdInfo   cmdInfo; /* only valid in the context of executing the
+				  * relevant command
+				  */
+   } cu;
 }
 #include "vmware_pack_end.h"
 Vmxnet3_DriverShared;

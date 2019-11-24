@@ -1,39 +1,12 @@
-..  BSD LICENSE
-    Copyright(c) 2010-2014 Intel Corporation. All rights reserved.
-    All rights reserved.
-
-    Redistribution and use in source and binary forms, with or without
-    modification, are permitted provided that the following conditions
-    are met:
-
-    * Redistributions of source code must retain the above copyright
-    notice, this list of conditions and the following disclaimer.
-    * Redistributions in binary form must reproduce the above copyright
-    notice, this list of conditions and the following disclaimer in
-    the documentation and/or other materials provided with the
-    distribution.
-    * Neither the name of Intel Corporation nor the names of its
-    contributors may be used to endorse or promote products derived
-    from this software without specific prior written permission.
-
-    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-    "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-    A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-    OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-    SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-    LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-    DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-    THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-    OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+..  SPDX-License-Identifier: BSD-3-Clause
+    Copyright(c) 2010-2014 Intel Corporation.
 
 .. _linux_setup_script:
 
 Quick Start Setup Script
 ========================
 
-The dpdk-setup.sh script, found in the tools subdirectory, allows the user to perform the following tasks:
+The dpdk-setup.sh script, found in the usertools subdirectory, allows the user to perform the following tasks:
 
 *   Build the DPDK libraries
 
@@ -108,7 +81,7 @@ Some options in the script prompt the user for further data before proceeding.
 
 .. code-block:: console
 
-    source tools/dpdk-setup.sh
+    source usertools/dpdk-setup.sh
 
     ------------------------------------------------------------------------
 
@@ -126,19 +99,15 @@ Some options in the script prompt the user for further data before proceeding.
 
     [3] ppc_64-power8-linuxapp-gcc
 
-    [4] x86_64-ivshmem-linuxapp-gcc
+    [4] x86_64-native-bsdapp-clang
 
-    [5] x86_64-ivshmem-linuxapp-icc
+    [5] x86_64-native-bsdapp-gcc
 
-    [6] x86_64-native-bsdapp-clang
+    [6] x86_64-native-linuxapp-clang
 
-    [7] x86_64-native-bsdapp-gcc
+    [7] x86_64-native-linuxapp-gcc
 
-    [8] x86_64-native-linuxapp-clang
-
-    [9] x86_64-native-linuxapp-gcc
-
-    [10] x86_64-native-linuxapp-icc
+    [8] x86_64-native-linuxapp-icc
 
     ------------------------------------------------------------------------
 
@@ -286,7 +255,7 @@ the logical core layout of the platform should be determined when selecting a co
       INSTALL-APP helloworld
       INSTALL-MAP helloworld.map
 
-    sudo ./build/app/helloworld -c 0xf -n 3
+    sudo ./build/app/helloworld -l 0-3 -n 3
     [sudo] password for rte:
 
     EAL: coremask set to f

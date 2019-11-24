@@ -20,13 +20,20 @@
 ########MAKEFILE##########
 
 ifeq ($(FF_PATH),)
-    $(error variable FF_PATH is not set)
+    FF_PATH=/usr/local
+    $(warning FF_PATH environment variable not defined, default FF_PATH=/usr/local)
+endif
+
+ifeq ($(FF_DPDK),)
+    FF_DPDK=/usr/local
+    $(warning FF_DPDK environment variable not defined, default FF_DPDK=/usr/local)
 endif
 
 DEBUG= -g
 BINARY = libmt.a
-FF_LIB=$(FF_PATH)/libfstack.a
-DPDK_LIBS = $(shell pkg-config --define-variable=TOPDIR=${FF_PATH} --libs f-stack.pc)
+FF_LIBS+= -L${FF_PATH}/lib -Wl,--whole-archive,-lfstack,--no-whole-archive
+FF_LIBS+= -L${FF_DPDK}/lib -Wl,--whole-archive,-ldpdk,--no-whole-archive
+FF_LIBS+= -Wl,--no-whole-archive -lrt -lm -ldl -lcrypto -lpthread -lnuma
 
 # Comment the following line if you are not using the gnu c compiler
 #C_ARGS = -Wall -g -fPIC -D_DEBUG
@@ -87,9 +94,9 @@ LIB_OBJ = micro_thread.o kqueue_proxy.o arch_ctx.o mt_session.o mt_notify.o mt_a
 libmt.a: $(LIB_OBJ)
 	@echo -e  Linking $(CYAN)$@$(RESET) ...$(RED)
 	@-rm -f $@ 
-	@ar crs  $@  $^ $(FST_LIB) $(CRESET)
+	@ar crs  $@  $^ $(CRESET)
 	@chmod +x $@ 
 
 echo: echo.o libmt.a
 	@echo -e Compile $(CYAN)$@$(RESET) ...$(RED)
-	@$(CC) -O -gdwarf-2 -o $@ $^ -lstdc++ -ldl -lm $(DPDK_LIBS) $(CRESET)
+	@$(CC) -O -gdwarf-2 -o $@ $^ -lstdc++ -ldl -lm $(FF_LIBS) $(CRESET)

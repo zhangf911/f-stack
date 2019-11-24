@@ -1,3 +1,6 @@
+..  SPDX-License-Identifier: BSD-3-Clause
+    Copyright 2018 The DPDK contributors
+
 ABI and API Deprecation
 =======================
 
@@ -8,64 +11,97 @@ API and ABI deprecation notices are to be posted here.
 Deprecation Notices
 -------------------
 
-* The log history is deprecated.
-  It is voided in 16.07 and will be removed in release 16.11.
+* linux: Linux kernel version 3.2 (which is the current minimum required
+  version for the DPDK) is not maintained anymore. Therefore the planned
+  minimum required kernel version for DPDK 19.02 will be the next oldest
+  Long Term Stable (LTS) version which is 3.16, but compatibility for
+  recent distribution kernels will be kept.
 
-* The ethdev library file will be renamed from libethdev.* to librte_ethdev.*
-  in release 16.11 in order to have a more consistent namespace.
+* kvargs: The function ``rte_kvargs_process`` will get a new parameter
+  for returning key match count. It will ease handling of no-match case.
 
-* In 16.11 ABI changes are planned: the ``rte_eth_dev`` structure will be
-  extended with new function pointer ``tx_pkt_prep`` allowing verification
-  and processing of packet burst to meet HW specific requirements before
-  transmit. Also new fields will be added to the ``rte_eth_desc_lim`` structure:
-  ``nb_seg_max`` and ``nb_mtu_seg_max`` providing information about number of
-  segments limit to be transmitted by device for TSO/non-TSO packets.
+* eal: function ``rte_bsf64`` in ``rte_bitmap.h`` has been renamed to
+  ``rte_bsf64_safe`` and moved to ``rte_common.h``. A new ``rte_bsf64`` function
+  will be added in the next release in ``rte_common.h`` that follows convention
+  set by existing ``rte_bsf32`` function.
 
-* The ethdev hotplug API is going to be moved to EAL with a notification
-  mechanism added to crypto and ethdev libraries so that hotplug is now
-  available to both of them. This API will be stripped of the device arguments
-  so that it only cares about hotplugging.
+* eal: both declaring and identifying devices will be streamlined in v18.11.
+  New functions will appear to query a specific port from buses, classes of
+  device and device drivers. Device declaration will be made coherent with the
+  new scheme of device identification.
+  As such, ``rte_devargs`` device representation will change.
 
-* Structures embodying pci and vdev devices are going to be reworked to
-  integrate new common rte_device / rte_driver objects (see
-  http://dpdk.org/ml/archives/dev/2016-January/031390.html).
-  ethdev and crypto libraries will then only handle those objects so that they
-  do not need to care about the kind of devices that are being used, making it
-  easier to add new buses later.
+  - The enum ``rte_devtype`` was used to identify a bus and will disappear.
+  - Functions previously deprecated will change or disappear:
 
-* ABI changes are planned for 16.11 in the ``rte_mbuf`` structure: some fields
-  may be reordered to facilitate the writing of ``data_off``, ``refcnt``, and
-  ``nb_segs`` in one operation, because some platforms have an overhead if the
-  store address is not naturally aligned. Other mbuf fields, such as the
-  ``port`` field, may be moved or removed as part of this mbuf work.
+    + ``rte_eal_devargs_type_count``
 
-* The mbuf flags PKT_RX_VLAN_PKT and PKT_RX_QINQ_PKT are deprecated and
-  are respectively replaced by PKT_RX_VLAN_STRIPPED and
-  PKT_RX_QINQ_STRIPPED, that are better described. The old flags and
-  their behavior will be kept in 16.07 and will be removed in 16.11.
+* pci: Several exposed functions are misnamed.
+  The following functions are deprecated starting from v17.11 and are replaced:
 
-* The APIs rte_mempool_count and rte_mempool_free_count are being deprecated
-  on the basis that they are confusing to use - free_count actually returns
-  the number of allocated entries, not the number of free entries as expected.
-  They are being replaced by rte_mempool_avail_count and
-  rte_mempool_in_use_count respectively.
+  - ``eal_parse_pci_BDF`` replaced by ``rte_pci_addr_parse``
+  - ``eal_parse_pci_DomBDF`` replaced by ``rte_pci_addr_parse``
+  - ``rte_eal_compare_pci_addr`` replaced by ``rte_pci_addr_cmp``
 
-* The mempool functions for single/multi producer/consumer are deprecated and
-  will be removed in 16.11.
-  It is replaced by rte_mempool_generic_get/put functions.
+* dpaa2: removal of ``rte_dpaa2_memsegs`` structure which has been replaced
+  by a pa-va search library. This structure was earlier being used for holding
+  memory segments used by dpaa2 driver for faster pa->va translation. This
+  structure would be made internal (or removed if all dependencies are cleared)
+  in future releases.
 
-* The ``rte_ivshmem`` feature (including library and EAL code) will be removed
-  in 16.11 because it has some design issues which are not planned to be fixed.
+* mbuf: The opaque ``mbuf->hash.sched`` field will be updated to support generic
+  definition in line with the ethdev TM and MTR APIs. Currently, this field
+  is defined in librte_sched in a non-generic way. The new generic format
+  will contain: queue ID, traffic class, color. Field size will not change.
 
-* The vhost-cuse will be removed in 16.11. Since v2.1, a large majority of
-  development effort has gone to vhost-user, such as multiple-queue, live
-  migration, reconnect etc. Therefore, vhost-user should be used instead.
+* sched: Some API functions will change prototype due to the above
+  deprecation note for mbuf->hash.sched, e.g. ``rte_sched_port_pkt_write()``
+  and ``rte_sched_port_pkt_read()`` will likely have an additional parameter
+  of type ``struct rte_sched_port``.
 
-* Driver names are quite inconsistent among each others and they will be
-  renamed to something more consistent (net and crypto prefixes) in 16.11.
-  Some of these driver names are used publicly, to create virtual devices,
-  so a deprecation notice is necessary.
+* mbuf: the macro ``RTE_MBUF_INDIRECT()`` will be removed in v18.08 or later and
+  replaced with ``RTE_MBUF_CLONED()`` which is already added in v18.05. As
+  ``EXT_ATTACHED_MBUF`` is newly introduced in v18.05, ``RTE_MBUF_INDIRECT()``
+  can no longer be mutually exclusive with ``RTE_MBUF_DIRECT()`` if the new
+  experimental API ``rte_pktmbuf_attach_extbuf()`` is used. Removal of the macro
+  is to fix this semantic inconsistency.
 
-* API will change for ``rte_port_source_params`` and ``rte_port_sink_params``
-  structures. The member ``file_name`` data type will be changed from
-  ``char *`` to ``const char *``. This change targets release 16.11.
+* ethdev: the legacy filter API, including
+  ``rte_eth_dev_filter_supported()``, ``rte_eth_dev_filter_ctrl()`` as well
+  as filter types MACVLAN, ETHERTYPE, FLEXIBLE, SYN, NTUPLE, TUNNEL, FDIR,
+  HASH and L2_TUNNEL, is superseded by the generic flow API (rte_flow) in
+  PMDs that implement the latter.
+  Target release for removal of the legacy API will be defined once most
+  PMDs have switched to rte_flow.
+
+* ethdev: Maximum and minimum MTU values vary between hardware devices. In
+  hardware agnostic DPDK applications access to such information would allow
+  a more accurate way of validating and setting supported MTU values on a per
+  device basis rather than using a defined default for all devices. To
+  resolve this, the following members will be added to ``rte_eth_dev_info``.
+  Note: these can be added to fit a hole in the existing structure for amd64
+  but not for 32-bit, as such ABI change will occur as size of the structure
+  will increase.
+
+  - Member ``uint16_t min_mtu`` the minimum MTU allowed.
+  - Member ``uint16_t max_mtu`` the maximum MTU allowed.
+
+* security: New field ``uint64_t opaque_data`` is planned to be added into
+  ``rte_security_session`` structure. That would allow upper layer to easily
+  associate/de-associate some user defined data with the security session.
+
+* cryptodev: several API and ABI changes are planned for rte_cryptodev
+  in v19.02:
+
+  - The size and layout of ``rte_cryptodev_sym_session`` will change
+    to fix existing issues.
+  - The size and layout of ``rte_cryptodev_qp_conf`` and syntax of
+    ``rte_cryptodev_queue_pair_setup`` will change to to allow to use
+    two different mempools for crypto and device private sessions.
+
+* pdump: As we changed to use generic IPC, some changes in APIs and structure
+  are expected in subsequent release.
+
+  - ``rte_pdump_set_socket_dir`` will be removed;
+  - The parameter, ``path``, of ``rte_pdump_init`` will be removed;
+  - The enum ``rte_pdump_socktype`` will be removed.

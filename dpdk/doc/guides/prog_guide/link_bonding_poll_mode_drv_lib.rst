@@ -1,39 +1,12 @@
-..  BSD LICENSE
-    Copyright(c) 2010-2015 Intel Corporation. All rights reserved.
-    All rights reserved.
-
-    Redistribution and use in source and binary forms, with or without
-    modification, are permitted provided that the following conditions
-    are met:
-
-    * Redistributions of source code must retain the above copyright
-    notice, this list of conditions and the following disclaimer.
-    * Redistributions in binary form must reproduce the above copyright
-    notice, this list of conditions and the following disclaimer in
-    the documentation and/or other materials provided with the
-    distribution.
-    * Neither the name of Intel Corporation nor the names of its
-    contributors may be used to endorse or promote products derived
-    from this software without specific prior written permission.
-
-    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-    "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-    A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-    OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-    SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-    LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-    DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-    THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-    OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+..  SPDX-License-Identifier: BSD-3-Clause
+    Copyright(c) 2010-2015 Intel Corporation.
 
 Link Bonding Poll Mode Driver Library
 =====================================
 
 In addition to Poll Mode Drivers (PMDs) for physical and virtual hardware,
 DPDK also includes a pure-software library that
-allows physical PMD's to be bonded together to create a single logical PMD.
+allows physical PMDs to be bonded together to create a single logical PMD.
 
 .. figure:: img/bond-overview.*
 
@@ -41,12 +14,12 @@ allows physical PMD's to be bonded together to create a single logical PMD.
 
 
 The Link Bonding PMD library(librte_pmd_bond) supports bonding of groups of
-``rte_eth_dev`` ports of the same speed and duplex to provide
-similar the capabilities to that found in Linux bonding driver to allow the
-aggregation of multiple (slave) NICs into a single logical interface between a
-server and a switch. The new bonded PMD will then process these interfaces
-based on the mode of operation specified to provide support for features such
-as redundant links, fault tolerance and/or load balancing.
+``rte_eth_dev`` ports of the same speed and duplex to provide similar
+capabilities to that found in Linux bonding driver to allow the aggregation
+of multiple (slave) NICs into a single logical interface between a server
+and a switch. The new bonded PMD will then process these interfaces based on
+the mode of operation specified to provide support for features such as
+redundant links, fault tolerance and/or load balancing.
 
 The librte_pmd_bond library exports a C API which provides an API for the
 creation of bonded devices as well as the configuration and management of the
@@ -175,6 +148,8 @@ the RX and TX queues are also reconfigured using ``rte_eth_tx_queue_setup`` /
 ``rte_eth_rx_queue_setup`` with the parameters use to configure the bonding
 device. If RSS is enabled for bonding device, this mode is also enabled on new
 slave and configured as well.
+Any flow which was configured to the bond device also is configured to the added
+slave.
 
 Setting up multi-queue mode for bonding device to RSS, makes it fully
 RSS-capable, so all slaves are synchronized with its configuration. This mode is
@@ -192,6 +167,43 @@ supported by all bonded slaves. RETA size is a GCD of all its RETA's sizes, so
 it can be easily used as a pattern providing expected behavior, even if slave
 RETAs' sizes are different. If RSS Key is not set for bonded device, it's not
 changed on the slaves and default key for device is used.
+
+As RSS configurations, there is flow consistency in the bonded slaves for the
+next rte flow operations:
+
+Validate:
+	- Validate flow for each slave, failure at least for one slave causes to
+	  bond validation failure.
+
+Create:
+	- Create the flow in all slaves.
+	- Save all the slaves created flows objects in bonding internal flow
+	  structure.
+	- Failure in flow creation for existed slave rejects the flow.
+	- Failure in flow creation for new slaves in slave adding time rejects
+	  the slave.
+
+Destroy:
+	- Destroy the flow in all slaves and release the bond internal flow
+	  memory.
+
+Flush:
+	- Destroy all the bonding PMD flows in all the slaves.
+
+.. note::
+
+    Don't call slaves flush directly, It destroys all the slave flows which
+    may include external flows or the bond internal LACP flow.
+
+Query:
+	- Summarize flow counters from all the slaves, relevant only for
+	  ``RTE_FLOW_ACTION_TYPE_COUNT``.
+
+Isolate:
+	- Call to flow isolate for all slaves.
+	- Failure in flow isolation for existed slave rejects the isolate mode.
+	- Failure in flow isolation for new slaves in slave adding time rejects
+	  the slave.
 
 All settings are managed through the bonding port API and always are propagated
 in one direction (from bonding to slaves).
@@ -234,8 +246,8 @@ common hash function available for each of them. Changing RSS key is only
 possible, when all slave devices support the same key size.
 
 To prevent inconsistency on how slaves process packets, once a device is added
-to a bonding device, RSS configuration should be managed through the bonding
-device API, and not directly on the slave.
+to a bonding device, RSS and rte flow configurations should be managed through
+the bonding device API, and not directly on the slave.
 
 Like all other PMD, all functions exported by a PMD are lock-free functions
 that are assumed not to be invoked in parallel on different logical cores to
@@ -356,7 +368,7 @@ Using Link Bonding Devices from the EAL Command Line
 
 Link bonding devices can be created at application startup time using the
 ``--vdev`` EAL command line option. The device name must start with the
-eth_bond prefix followed by numbers or letters. The name must be unique for
+net_bonding prefix followed by numbers or letters. The name must be unique for
 each device. Each device can have multiple options arranged in a comma
 separated list. Multiple devices definitions can be arranged by calling the
 ``--vdev`` option multiple times.
@@ -365,7 +377,7 @@ Device names and bonding options must be separated by commas as shown below:
 
 .. code-block:: console
 
-    $RTE_TARGET/app/testpmd -c f -n 4 --vdev 'eth_bond0,bond_opt0=..,bond opt1=..'--vdev 'eth_bond1,bond _opt0=..,bond_opt1=..'
+    $RTE_TARGET/app/testpmd -l 0-3 -n 4 --vdev 'net_bonding0,bond_opt0=..,bond opt1=..'--vdev 'net_bonding1,bond _opt0=..,bond_opt1=..'
 
 Link Bonding EAL Options
 ^^^^^^^^^^^^^^^^^^^^^^^^
@@ -373,7 +385,7 @@ Link Bonding EAL Options
 There are multiple ways of definitions that can be assessed and combined as
 long as the following two rules are respected:
 
-*   A unique device name, in the format of eth_bondX is provided,
+*   A unique device name, in the format of net_bondingX is provided,
     where X can be any combination of numbers and/or letters,
     and the name is no greater than 32 characters long.
 
@@ -465,22 +477,22 @@ Create a bonded device in round robin mode with two slaves specified by their PC
 
 .. code-block:: console
 
-    $RTE_TARGET/app/testpmd -c '0xf' -n 4 --vdev 'eth_bond0,mode=0, slave=0000:00a:00.01,slave=0000:004:00.00' -- --port-topology=chained
+    $RTE_TARGET/app/testpmd -l 0-3 -n 4 --vdev 'net_bonding0,mode=0,slave=0000:0a:00.01,slave=0000:04:00.00' -- --port-topology=chained
 
 Create a bonded device in round robin mode with two slaves specified by their PCI address and an overriding MAC address:
 
 .. code-block:: console
 
-    $RTE_TARGET/app/testpmd -c '0xf' -n 4 --vdev 'eth_bond0,mode=0, slave=0000:00a:00.01,slave=0000:004:00.00,mac=00:1e:67:1d:fd:1d' -- --port-topology=chained
+    $RTE_TARGET/app/testpmd -l 0-3 -n 4 --vdev 'net_bonding0,mode=0,slave=0000:0a:00.01,slave=0000:04:00.00,mac=00:1e:67:1d:fd:1d' -- --port-topology=chained
 
 Create a bonded device in active backup mode with two slaves specified, and a primary slave specified by their PCI addresses:
 
 .. code-block:: console
 
-    $RTE_TARGET/app/testpmd -c '0xf' -n 4 --vdev 'eth_bond0,mode=1, slave=0000:00a:00.01,slave=0000:004:00.00,primary=0000:00a:00.01' -- --port-topology=chained
+    $RTE_TARGET/app/testpmd -l 0-3 -n 4 --vdev 'net_bonding0,mode=1,slave=0000:0a:00.01,slave=0000:04:00.00,primary=0000:0a:00.01' -- --port-topology=chained
 
 Create a bonded device in balance mode with two slaves specified by their PCI addresses, and a transmission policy of layer 3 + 4 forwarding:
 
 .. code-block:: console
 
-    $RTE_TARGET/app/testpmd -c '0xf' -n 4 --vdev 'eth_bond0,mode=2, slave=0000:00a:00.01,slave=0000:004:00.00,xmit_policy=l34' -- --port-topology=chained
+    $RTE_TARGET/app/testpmd -l 0-3 -n 4 --vdev 'net_bonding0,mode=2,slave=0000:0a:00.01,slave=0000:04:00.00,xmit_policy=l34' -- --port-topology=chained

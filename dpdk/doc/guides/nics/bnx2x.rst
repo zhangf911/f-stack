@@ -34,7 +34,7 @@ BNX2X Poll Mode Driver
 The BNX2X poll mode driver library (**librte_pmd_bnx2x**) implements support
 for **QLogic 578xx** 10/20 Gbps family of adapters as well as their virtual
 functions (VF) in SR-IOV context. It is supported on several standard Linux
-distros like Red Hat 7.x and SLES12 OS. It is compile-tested under FreeBSD OS.
+distros like RHEL and SLES. It is compile-tested under FreeBSD OS.
 
 More information can be found at `QLogic Corporation's Official Website
 <http://www.qlogic.com>`_.
@@ -65,14 +65,26 @@ The features not yet supported include:
 Co-existence considerations
 ---------------------------
 
-- BCM578xx being a CNA can have both NIC and Storage personalities.
-  However, coexistence with storage protocol drivers (cnic, bnx2fc and
-  bnx2fi) is not supported on the same adapter. So storage personality
-  has to be disabled on that adapter when used in DPDK applications.
+- QLogic 578xx CNAs support Ethernet, iSCSI and FCoE functionalities.
+  These functionalities are supported using QLogic Linux kernel
+  drivers bnx2x, cnic, bnx2i and bnx2fc. DPDK is supported on these
+  adapters using bnx2x PMD.
 
-- For SR-IOV case, bnx2x PMD will be used to bind to SR-IOV VF device and
-  Linux native kernel driver (bnx2x) will be attached to SR-IOV PF.
+- When SR-IOV is not enabled on the adapter,
+  QLogic Linux kernel drivers (bnx2x, cnic, bnx2i and bnx2fc) and bnx2x
+  PMD can’t be attached to different PFs on a given QLogic 578xx
+  adapter.
+  A given adapter needs to be completely used by DPDK or Linux drivers.
+  Before binding DPDK driver to one or more PFs on the adapter,
+  please make sure to unbind Linux drivers from all PFs of the adapter.
+  If there are multiple adapters on the system, one or more adapters
+  can be used by DPDK driver completely and other adapters can be used
+  by Linux drivers completely.
 
+- When SR-IOV is enabled on the adapter,
+  Linux kernel drivers (bnx2x, cnic, bnx2i and bnx2fc) can be bound
+  to the PFs of a given adapter and either bnx2x PMD or Linux drivers
+  bnx2x can be bound to the VFs of the adapter.
 
 Supported QLogic NICs
 ---------------------
@@ -84,7 +96,7 @@ Prerequisites
 
 - Requires firmware version **7.2.51.0**. It is included in most of the
   standard Linux distros. If it is not available visit
-  `QLogic Driver Download Center <http://driverdownloads.qlogic.com>`_
+  `linux-firmware git repository <https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain/bnx2x/bnx2x-e2-7.2.51.0.fw>`_
   to get the required firmware.
 
 Pre-Installation Configuration
@@ -96,17 +108,11 @@ Config File Options
 The following options can be modified in the ``.config`` file. Please note that
 enabling debugging options may affect system performance.
 
-- ``CONFIG_RTE_LIBRTE_BNX2X_PMD`` (default **y**)
+- ``CONFIG_RTE_LIBRTE_BNX2X_PMD`` (default **n**)
 
-  Toggle compilation of bnx2x driver.
-
-- ``CONFIG_RTE_LIBRTE_BNX2X_DEBUG`` (default **n**)
-
-  Toggle display of generic debugging messages.
-
-- ``CONFIG_RTE_LIBRTE_BNX2X_DEBUG_INIT`` (default **n**)
-
-  Toggle display of initialization related messages.
+  Toggle compilation of bnx2x driver. To use bnx2x PMD set this config parameter
+  to 'y'. Also, in order for firmware binary to load user will need zlib devel
+  package installed.
 
 - ``CONFIG_RTE_LIBRTE_BNX2X_DEBUG_TX`` (default **n**)
 
@@ -123,143 +129,14 @@ enabling debugging options may affect system performance.
 
 .. _bnx2x_driver-compilation:
 
-Driver Compilation
-~~~~~~~~~~~~~~~~~~
+Driver compilation and testing
+------------------------------
 
-BNX2X PMD for Linux x86_64 gcc target, run the following "make"
-command::
-
-   cd <DPDK-source-directory>
-   make config T=x86_64-native-linuxapp-gcc install
-
-To compile BNX2X PMD for Linux x86_64 clang target, run the following "make"
-command::
-
-   cd <DPDK-source-directory>
-   make config T=x86_64-native-linuxapp-clang install
-
-To compile BNX2X PMD for Linux i686 gcc target, run the following "make"
-command::
-
-   cd <DPDK-source-directory>
-   make config T=i686-native-linuxapp-gcc install
-
-To compile BNX2X PMD for Linux i686 gcc target, run the following "make"
-command:
-
-.. code-block:: console
-
-   cd <DPDK-source-directory>
-   make config T=i686-native-linuxapp-gcc install
-
-To compile BNX2X PMD for FreeBSD x86_64 clang target, run the following "gmake"
-command::
-
-   cd <DPDK-source-directory>
-   gmake config T=x86_64-native-bsdapp-clang install
-
-To compile BNX2X PMD for FreeBSD x86_64 gcc target, run the following "gmake"
-command::
-
-   cd <DPDK-source-directory>
-   gmake config T=x86_64-native-bsdapp-gcc install -Wl,-rpath=/usr/local/lib/gcc48 CC=gcc48
-
-To compile BNX2X PMD for FreeBSD x86_64 gcc target, run the following "gmake"
-command:
-
-.. code-block:: console
-
-   cd <DPDK-source-directory>
-   gmake config T=x86_64-native-bsdapp-gcc install -Wl,-rpath=/usr/local/lib/gcc48 CC=gcc48
-
-Linux
------
-
-.. _bnx2x_Linux-installation:
-
-Linux Installation
-~~~~~~~~~~~~~~~~~~
-
-Sample Application Notes
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-This section demonstrates how to launch ``testpmd`` with QLogic 578xx
-devices managed by ``librte_pmd_bnx2x`` in Linux operating system.
-
-#. Request huge pages:
-
-   .. code-block:: console
-
-      echo 1024 > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages/nr_hugepages
-
-#. Load ``igb_uio`` or ``vfio-pci`` driver:
-
-   .. code-block:: console
-
-      insmod ./x86_64-native-linuxapp-gcc/kmod/igb_uio.ko
-
-   or
-
-   .. code-block:: console
-
-      modprobe vfio-pci
-
-#. Bind the QLogic adapters to ``igb_uio`` or ``vfio-pci`` loaded in the
-   previous step::
-
-      ./tools/dpdk-devbind.py --bind igb_uio 0000:84:00.0 0000:84:00.1
-
-   or
-
-   Setup VFIO permissions for regular users and then bind to ``vfio-pci``:
-
-   .. code-block:: console
-
-      sudo chmod a+x /dev/vfio
-
-      sudo chmod 0666 /dev/vfio/*
-
-      ./tools/dpdk-devbind.py --bind vfio-pci 0000:84:00.0 0000:84:00.1
-
-#. Start ``testpmd`` with basic parameters:
-
-   .. code-block:: console
-
-      ./x86_64-native-linuxapp-gcc/app/testpmd -c 0xf -n 4 -- -i
-
-   Example output:
-
-   .. code-block:: console
-
-      [...]
-      EAL: PCI device 0000:84:00.0 on NUMA socket 1
-      EAL:   probe driver: 14e4:168e rte_bnx2x_pmd
-      EAL:   PCI memory mapped at 0x7f14f6fe5000
-      EAL:   PCI memory mapped at 0x7f14f67e5000
-      EAL:   PCI memory mapped at 0x7f15fbd9b000
-      EAL: PCI device 0000:84:00.1 on NUMA socket 1
-      EAL:   probe driver: 14e4:168e rte_bnx2x_pmd
-      EAL:   PCI memory mapped at 0x7f14f5fe5000
-      EAL:   PCI memory mapped at 0x7f14f57e5000
-      EAL:   PCI memory mapped at 0x7f15fbd4f000
-      Interactive-mode selected
-      Configuring Port 0 (socket 0)
-      PMD: bnx2x_dev_tx_queue_setup(): fp[00] req_bd=512, thresh=512,
-                   usable_bd=1020, total_bd=1024,
-                                tx_pages=4
-      PMD: bnx2x_dev_rx_queue_setup(): fp[00] req_bd=128, thresh=0,
-                   usable_bd=510, total_bd=512,
-                                rx_pages=1, cq_pages=8
-      PMD: bnx2x_print_adapter_info():
-      [...]
-      Checking link statuses...
-      Port 0 Link Up - speed 10000 Mbps - full-duplex
-      Port 1 Link Up - speed 10000 Mbps - full-duplex
-      Done
-      testpmd>
+Refer to the document :ref:`compiling and testing a PMD for a NIC <pmd_build_and_test>`
+for details.
 
 SR-IOV: Prerequisites and sample Application Notes
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+--------------------------------------------------
 
 This section provides instructions to configure SR-IOV with Linux OS.
 
@@ -311,7 +188,6 @@ This section provides instructions to configure SR-IOV with Linux OS.
 
       echo 2 > /sys/devices/pci0000:00/0000:00:03.0/0000:81:00.0/sriov_numvfs
 
-
 #. Assign VF MAC address:
 
    Assign MAC address to the VF using iproute2 utility. The syntax is:
@@ -323,9 +199,46 @@ This section provides instructions to configure SR-IOV with Linux OS.
 
       ip link set ens5f0 vf 0 mac 52:54:00:2f:9d:e8
 
-
 #. PCI Passthrough:
 
    The VF devices may be passed through to the guest VM using virt-manager or
    virsh etc. bnx2x PMD should be used to bind the VF devices in the guest VM
    using the instructions outlined in the Application notes below.
+
+#. Running testpmd:
+   (Supply ``--log-level="pmd.net.bnx2x.driver",7`` to view informational messages):
+
+   Follow instructions available in the document
+   :ref:`compiling and testing a PMD for a NIC <pmd_build_and_test>`
+   to run testpmd.
+
+   Example output:
+
+   .. code-block:: console
+
+      [...]
+      EAL: PCI device 0000:84:00.0 on NUMA socket 1
+      EAL:   probe driver: 14e4:168e rte_bnx2x_pmd
+      EAL:   PCI memory mapped at 0x7f14f6fe5000
+      EAL:   PCI memory mapped at 0x7f14f67e5000
+      EAL:   PCI memory mapped at 0x7f15fbd9b000
+      EAL: PCI device 0000:84:00.1 on NUMA socket 1
+      EAL:   probe driver: 14e4:168e rte_bnx2x_pmd
+      EAL:   PCI memory mapped at 0x7f14f5fe5000
+      EAL:   PCI memory mapped at 0x7f14f57e5000
+      EAL:   PCI memory mapped at 0x7f15fbd4f000
+      Interactive-mode selected
+      Configuring Port 0 (socket 0)
+      PMD: bnx2x_dev_tx_queue_setup(): fp[00] req_bd=512, thresh=512,
+                   usable_bd=1020, total_bd=1024,
+                                tx_pages=4
+      PMD: bnx2x_dev_rx_queue_setup(): fp[00] req_bd=128, thresh=0,
+                   usable_bd=510, total_bd=512,
+                                rx_pages=1, cq_pages=8
+      PMD: bnx2x_print_adapter_info():
+      [...]
+      Checking link statuses...
+      Port 0 Link Up - speed 10000 Mbps - full-duplex
+      Port 1 Link Up - speed 10000 Mbps - full-duplex
+      Done
+      testpmd>

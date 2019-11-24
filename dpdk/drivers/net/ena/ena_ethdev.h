@@ -34,7 +34,10 @@
 #ifndef _ENA_ETHDEV_H_
 #define _ENA_ETHDEV_H_
 
+#include <rte_cycles.h>
 #include <rte_pci.h>
+#include <rte_bus_pci.h>
+#include <rte_timer.h>
 
 #include "ena_com.h"
 
@@ -42,32 +45,17 @@
 #define ENA_MEM_BAR	2
 
 #define ENA_MAX_NUM_QUEUES	128
-
-#define ENA_DEFAULT_TX_SW_DESCS	(1024)
-#define ENA_DEFAULT_TX_HW_DESCS	(1024)
 #define ENA_DEFAULT_RING_SIZE	(1024)
-
 #define ENA_MIN_FRAME_LEN	64
+#define ENA_NAME_MAX_LEN	20
+#define ENA_PKT_MAX_BUFS	17
 
-#define ENA_NAME_MAX_LEN     20
-#define ENA_IRQNAME_SIZE     40
-
-#define ENA_PKT_MAX_BUFS     17
+#define ENA_MIN_MTU		128
 
 #define ENA_MMIO_DISABLE_REG_READ	BIT(0)
 
-#define	ENA_CIRC_COUNT(head, tail, size)				\
-	(((uint16_t)((uint16_t)(head) - (uint16_t)(tail))) & ((size) - 1))
-
-#define ENA_CIRC_INC(index, step, size)					\
-	((uint16_t)(index) + (uint16_t)(step))
-#define	ENA_CIRC_INC_WRAP(index, step, size)				\
-	(((uint16_t)(index) + (uint16_t)(step))	& ((size) - 1))
-
-#define	ENA_TX_RING_IDX_NEXT(idx, ring_size)				\
-		ENA_CIRC_INC_WRAP(idx, 1, ring_size)
-#define	ENA_RX_RING_IDX_NEXT(idx, ring_size)				\
-		ENA_CIRC_INC_WRAP(idx, 1, ring_size)
+#define ENA_WD_TIMEOUT_SEC	3
+#define ENA_DEVICE_KALIVE_TIMEOUT (ENA_WD_TIMEOUT_SEC * rte_get_timer_hz())
 
 struct ena_adapter;
 
@@ -89,12 +77,17 @@ struct ena_ring {
 
 	enum ena_ring_type type;
 	enum ena_admin_placement_policy_type tx_mem_queue_type;
-	/* Holds the empty requests for TX OOO completions */
-	uint16_t *empty_tx_reqs;
+	/* Holds the empty requests for TX/RX OOO completions */
+	union {
+		uint16_t *empty_tx_reqs;
+		uint16_t *empty_rx_reqs;
+	};
+
 	union {
 		struct ena_tx_buffer *tx_buffer_info; /* contex of tx packet */
 		struct rte_mbuf **rx_buffer_info; /* contex of rx packet */
 	};
+	struct rte_mbuf **rx_refill_buffer;
 	unsigned int ring_size; /* number of tx/rx_buffer_info's entries */
 
 	struct ena_com_io_cq *ena_com_io_cq;
@@ -110,14 +103,18 @@ struct ena_ring {
 	uint8_t tx_max_header_size;
 	int configured;
 	struct ena_adapter *adapter;
+	uint64_t offloads;
+	u16 sgl_size;
+	unsigned int numa_socket_id;
 } __rte_cache_aligned;
 
 enum ena_adapter_state {
 	ENA_ADAPTER_STATE_FREE    = 0,
 	ENA_ADAPTER_STATE_INIT    = 1,
-	ENA_ADAPTER_STATE_RUNNING  = 2,
+	ENA_ADAPTER_STATE_RUNNING = 2,
 	ENA_ADAPTER_STATE_STOPPED = 3,
 	ENA_ADAPTER_STATE_CONFIG  = 4,
+	ENA_ADAPTER_STATE_CLOSED  = 5,
 };
 
 struct ena_driver_stats {
@@ -175,6 +172,7 @@ struct ena_adapter {
 	/* TX */
 	struct ena_ring tx_ring[ENA_MAX_NUM_QUEUES] __rte_cache_aligned;
 	int tx_ring_size;
+	u16 max_tx_sgl_size;
 
 	/* RX */
 	struct ena_ring rx_ring[ENA_MAX_NUM_QUEUES] __rte_cache_aligned;
@@ -182,6 +180,7 @@ struct ena_adapter {
 
 	u16 num_queues;
 	u16 max_mtu;
+	u8 tso4_supported;
 
 	int id_number;
 	char name[ENA_NAME_MAX_LEN];
@@ -193,6 +192,22 @@ struct ena_adapter {
 	struct ena_driver_stats *drv_stats;
 	enum ena_adapter_state state;
 
+	uint64_t tx_supported_offloads;
+	uint64_t tx_selected_offloads;
+	uint64_t rx_supported_offloads;
+	uint64_t rx_selected_offloads;
+
+	bool link_status;
+
+	enum ena_regs_reset_reason_types reset_reason;
+
+	struct rte_timer timer_wd;
+	uint64_t timestamp_wd;
+	uint64_t keep_alive_timeout;
+
+	bool trigger_reset;
+
+	bool wd_state;
 };
 
 #endif /* _ENA_ETHDEV_H_ */

@@ -185,7 +185,7 @@ static MALLOC_DEFINE(M_SCTPNAT, "sctpnat", "sctp nat dbs");
 /* Use kernel allocator. */
 #ifdef _SYS_MALLOC_H_
 #define	sn_malloc(x)	malloc(x, M_SCTPNAT, M_NOWAIT|M_ZERO)
-#define	sn_calloc(n,x)	sn_malloc(x * n)
+#define	sn_calloc(n,x)	sn_malloc((x) * (n))
 #define	sn_free(x)	free(x, M_SCTPNAT)
 #endif// #ifdef _SYS_MALLOC_H_
 
@@ -2127,8 +2127,8 @@ FindSctpLocalT(struct libalias *la,  struct in_addr g_addr, uint32_t l_vtag, uin
 			if ((assoc->g_vtag == l_vtag) && (assoc->g_port == g_port) && (assoc->l_port == l_port)) {
 				if (assoc->num_Gaddr) {
 					LIST_FOREACH(G_Addr, &(assoc->Gaddr), list_Gaddr) {
-						if(G_Addr->g_addr.s_addr == G_Addr->g_addr.s_addr)
-							return(assoc); /* full match */
+						if (G_Addr->g_addr.s_addr == g_addr.s_addr)
+							return (assoc); /* full match */
 					}
 				} else {
 					if (++cnt > 1) return(NULL);

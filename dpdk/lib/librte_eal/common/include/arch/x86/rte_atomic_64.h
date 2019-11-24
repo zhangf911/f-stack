@@ -37,8 +37,16 @@
  * All rights reserved.
  */
 
+#ifndef _RTE_ATOMIC_X86_H_
+#error do not include this file directly, use <rte_atomic.h> instead
+#endif
+
 #ifndef _RTE_ATOMIC_X86_64_H_
 #define _RTE_ATOMIC_X86_64_H_
+
+#include <stdint.h>
+#include <rte_common.h>
+#include <rte_atomic.h>
 
 /*------------------------- 64 bit atomic operations -------------------------*/
 
@@ -61,6 +69,18 @@ rte_atomic64_cmpset(volatile uint64_t *dst, uint64_t exp, uint64_t src)
 			: "memory");            /* no-clobber list */
 
 	return res;
+}
+
+static inline uint64_t
+rte_atomic64_exchange(volatile uint64_t *dst, uint64_t val)
+{
+	asm volatile(
+			MPLOCKED
+			"xchgq %0, %1;"
+			: "=r" (val), "=m" (*dst)
+			: "0" (val),  "m" (*dst)
+			: "memory");         /* no-clobber list */
+	return val;
 }
 
 static inline void

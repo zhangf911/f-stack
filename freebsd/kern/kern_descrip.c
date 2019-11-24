@@ -2499,7 +2499,7 @@ fget_unlocked(struct filedesc *fdp, int fd, cap_rights_t *needrightsp,
 			 */
 			#pragma GCC diagnostic ignored "-Wcast-qual"
 			fdt = *(struct fdescenttbl * volatile *)&(fdp->fd_files);
-            #pragma GCC diagnostic error "-Wcast-qual"
+			#pragma GCC diagnostic error "-Wcast-qual"
 			continue;
 		}
 		/*
@@ -4105,4 +4105,42 @@ fildesc_drvinit(void *unused)
 
 SYSINIT(fildescdev, SI_SUB_DRIVERS, SI_ORDER_MIDDLE, fildesc_drvinit, NULL);
 
+#else
+
+int
+ff_fdisused(int fd)
+{
+    struct thread *td = curthread;
+
+    if (fd < 0) {
+        return 0;
+    }
+
+    return (td && fd < td->td_proc->p_fd->fd_nfiles &&
+        fdisused(td->td_proc->p_fd, fd) &&
+        td->td_proc->p_fd->fd_ofiles[fd].fde_file != NULL);
+}
+
+/*
+ * block out a range of descriptors to avoid overlap with
+ * the kernel's descriptor space
+ */
+void
+ff_fdused_range(int max)
+{
+    int i, result;
+    struct thread *td = curthread;
+    for (i = 0; i < max; i++)
+        fdalloc(td, 0, &result);
+}
+
+int
+ff_getmaxfd(void)
+{
+	struct thread *td = curthread;
+	return 	getmaxfd(td);
+	
+}
+
 #endif
+

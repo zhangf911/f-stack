@@ -1,34 +1,5 @@
-/*-
- *   BSD LICENSE
- *
- *   Copyright(c) 2010-2014 Intel Corporation. All rights reserved.
- *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright(c) 2010-2014 Intel Corporation
  */
 
 #include <stdio.h>
@@ -47,9 +18,7 @@
 #include <rte_log.h>
 #include <rte_memory.h>
 #include <rte_memcpy.h>
-#include <rte_memzone.h>
 #include <rte_eal.h>
-#include <rte_per_lcore.h>
 #include <rte_launch.h>
 #include <rte_atomic.h>
 #include <rte_cycles.h>
@@ -58,7 +27,6 @@
 #include <rte_per_lcore.h>
 #include <rte_branch_prediction.h>
 #include <rte_interrupts.h>
-#include <rte_pci.h>
 #include <rte_random.h>
 #include <rte_debug.h>
 #include <rte_ether.h>
@@ -144,9 +112,10 @@ app_lcore_io_rx_buffer_to_send (
 	ret = rte_ring_sp_enqueue_bulk(
 		lp->rx.rings[worker],
 		(void **) lp->rx.mbuf_out[worker].array,
-		bsz);
+		bsz,
+		NULL);
 
-	if (unlikely(ret == -ENOBUFS)) {
+	if (unlikely(ret == 0)) {
 		uint32_t k;
 		for (k = 0; k < bsz; k ++) {
 			struct rte_mbuf *m = lp->rx.mbuf_out[worker].array[k];
@@ -188,7 +157,7 @@ app_lcore_io_rx(
 	uint32_t i;
 
 	for (i = 0; i < lp->rx.n_nic_queues; i ++) {
-		uint8_t port = lp->rx.nic_queues[i].port;
+		uint16_t port = lp->rx.nic_queues[i].port;
 		uint8_t queue = lp->rx.nic_queues[i].queue;
 		uint32_t n_mbufs, j;
 
@@ -213,7 +182,7 @@ app_lcore_io_rx(
 
 			printf("I/O RX %u in (NIC port %u): NIC drop ratio = %.2f avg burst size = %.2f\n",
 				lcore,
-				(unsigned) port,
+				port,
 				(double) stats.imissed / (double) (stats.imissed + stats.ipackets),
 				((double) lp->rx.nic_queues_count[i]) / ((double) lp->rx.nic_queues_iters[i]));
 			lp->rx.nic_queues_iters[i] = 0;
@@ -310,9 +279,10 @@ app_lcore_io_rx_flush(struct app_lcore_params_io *lp, uint32_t n_workers)
 		ret = rte_ring_sp_enqueue_bulk(
 			lp->rx.rings[worker],
 			(void **) lp->rx.mbuf_out[worker].array,
-			lp->rx.mbuf_out[worker].n_mbufs);
+			lp->rx.mbuf_out[worker].n_mbufs,
+			NULL);
 
-		if (unlikely(ret < 0)) {
+		if (unlikely(ret == 0)) {
 			uint32_t k;
 			for (k = 0; k < lp->rx.mbuf_out[worker].n_mbufs; k ++) {
 				struct rte_mbuf *pkt_to_free = lp->rx.mbuf_out[worker].array[k];
@@ -338,7 +308,7 @@ app_lcore_io_tx(
 		uint32_t i;
 
 		for (i = 0; i < lp->tx.n_nic_ports; i ++) {
-			uint8_t port = lp->tx.nic_ports[i];
+			uint16_t port = lp->tx.nic_ports[i];
 			struct rte_ring *ring = lp->tx.rings[port][worker];
 			uint32_t n_mbufs, n_pkts;
 			int ret;
@@ -347,11 +317,11 @@ app_lcore_io_tx(
 			ret = rte_ring_sc_dequeue_bulk(
 				ring,
 				(void **) &lp->tx.mbuf_out[port].array[n_mbufs],
-				bsz_rd);
+				bsz_rd,
+				NULL);
 
-			if (unlikely(ret == -ENOENT)) {
+			if (unlikely(ret == 0))
 				continue;
-			}
 
 			n_mbufs += bsz_rd;
 
@@ -394,7 +364,7 @@ app_lcore_io_tx(
 
 				printf("\t\t\tI/O TX %u out (port %u): avg burst size = %.2f\n",
 					lcore,
-					(unsigned) port,
+					port,
 					((double) lp->tx.nic_ports_count[port]) / ((double) lp->tx.nic_ports_iters[port]));
 				lp->tx.nic_ports_iters[port] = 0;
 				lp->tx.nic_ports_count[port] = 0;
@@ -417,11 +387,13 @@ app_lcore_io_tx(
 static inline void
 app_lcore_io_tx_flush(struct app_lcore_params_io *lp)
 {
-	uint8_t port;
+	uint16_t port;
+	uint32_t i;
 
-	for (port = 0; port < lp->tx.n_nic_ports; port ++) {
+	for (i = 0; i < lp->tx.n_nic_ports; i++) {
 		uint32_t n_pkts;
 
+		port = lp->tx.nic_ports[i];
 		if (likely((lp->tx.mbuf_out_flush[port] == 0) ||
 		           (lp->tx.mbuf_out[port].n_mbufs == 0))) {
 			lp->tx.mbuf_out_flush[port] = 1;
@@ -503,11 +475,11 @@ app_lcore_worker(
 		ret = rte_ring_sc_dequeue_bulk(
 			ring_in,
 			(void **) lp->mbuf_in.array,
-			bsz_rd);
+			bsz_rd,
+			NULL);
 
-		if (unlikely(ret == -ENOENT)) {
+		if (unlikely(ret == 0))
 			continue;
-		}
 
 #if APP_WORKER_DROP_ALL_PACKETS
 		for (j = 0; j < bsz_rd; j ++) {
@@ -555,24 +527,25 @@ app_lcore_worker(
 			ret = rte_ring_sp_enqueue_bulk(
 				lp->rings_out[port],
 				(void **) lp->mbuf_out[port].array,
-				bsz_wr);
+				bsz_wr,
+				NULL);
 
 #if APP_STATS
 			lp->rings_out_iters[port] ++;
-			if (ret == 0) {
+			if (ret > 0) {
 				lp->rings_out_count[port] += 1;
 			}
 			if (lp->rings_out_iters[port] == APP_STATS){
 				printf("\t\tWorker %u out (NIC port %u): enq success rate = %.2f\n",
 					(unsigned) lp->worker_id,
-					(unsigned) port,
+					port,
 					((double) lp->rings_out_count[port]) / ((double) lp->rings_out_iters[port]));
 				lp->rings_out_iters[port] = 0;
 				lp->rings_out_count[port] = 0;
 			}
 #endif
 
-			if (unlikely(ret == -ENOBUFS)) {
+			if (unlikely(ret == 0)) {
 				uint32_t k;
 				for (k = 0; k < bsz_wr; k ++) {
 					struct rte_mbuf *pkt_to_free = lp->mbuf_out[port].array[k];
@@ -607,9 +580,10 @@ app_lcore_worker_flush(struct app_lcore_params_worker *lp)
 		ret = rte_ring_sp_enqueue_bulk(
 			lp->rings_out[port],
 			(void **) lp->mbuf_out[port].array,
-			lp->mbuf_out[port].n_mbufs);
+			lp->mbuf_out[port].n_mbufs,
+			NULL);
 
-		if (unlikely(ret < 0)) {
+		if (unlikely(ret == 0)) {
 			uint32_t k;
 			for (k = 0; k < lp->mbuf_out[port].n_mbufs; k ++) {
 				struct rte_mbuf *pkt_to_free = lp->mbuf_out[port].array[k];

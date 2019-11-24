@@ -1,11 +1,8 @@
-/*
+/* SPDX-License-Identifier: BSD-3-Clause
  * Copyright (c) 2013-2015 Brocade Communications Systems, Inc.
- *
- * Copyright (c) 2015 QLogic Corporation.
+ * Copyright (c) 2015-2018 Cavium Inc.
  * All rights reserved.
- * www.qlogic.com
- *
- * See LICENSE.bnx2x_pmd for copyright and licensing details.
+ * www.cavium.com
  */
 
 #include "bnx2x.h"
@@ -40,12 +37,12 @@ bnx2x_check_bull(struct bnx2x_softc *sc)
 			if (bull->crc == bnx2x_vf_crc(bull))
 				break;
 
-			PMD_DRV_LOG(ERR, "bad crc on bulletin board. contained %x computed %x",
+			PMD_DRV_LOG(ERR, sc, "bad crc on bulletin board. contained %x computed %x",
 					bull->crc, bnx2x_vf_crc(bull));
 			++tries;
 		}
 		if (tries == BNX2X_VF_BULLETIN_TRIES) {
-			PMD_DRV_LOG(ERR, "pf to vf bulletin board crc was wrong %d consecutive times. Aborting",
+			PMD_DRV_LOG(ERR, sc, "pf to vf bulletin board crc was wrong %d consecutive times. Aborting",
 					tries);
 			return FALSE;
 		}
@@ -64,25 +61,46 @@ bnx2x_check_bull(struct bnx2x_softc *sc)
 	return TRUE;
 }
 
-/* add tlv to a buffer */
-#define BNX2X_TLV_APPEND(_tlvs, _offset, _type, _length) \
-	((struct vf_first_tlv *)((unsigned long)_tlvs + _offset))->type   = _type; \
-	((struct vf_first_tlv *)((unsigned long)_tlvs + _offset))->length = _length
+/* place a given tlv on the tlv buffer at a given offset */
+static void
+bnx2x_add_tlv(__rte_unused struct bnx2x_softc *sc, void *tlvs_list,
+	      uint16_t offset, uint16_t type, uint16_t length)
+{
+	struct channel_tlv *tl = (struct channel_tlv *)
+					((unsigned long)tlvs_list + offset);
+
+	tl->type = type;
+	tl->length = length;
+}
 
 /* Initiliaze header of the first tlv and clear mailbox*/
 static void
-bnx2x_init_first_tlv(struct bnx2x_softc *sc, struct vf_first_tlv *tlv,
-	uint16_t type, uint16_t len)
+bnx2x_vf_prep(struct bnx2x_softc *sc, struct vf_first_tlv *first_tlv,
+	      uint16_t type, uint16_t length)
 {
 	struct bnx2x_vf_mbx_msg *mbox = sc->vf2pf_mbox;
-	PMD_DRV_LOG(DEBUG, "Preparing %d tlv for sending", type);
+
+	rte_spinlock_lock(&sc->vf2pf_lock);
+
+	PMD_DRV_LOG(DEBUG, sc, "Preparing %d tlv for sending", type);
 
 	memset(mbox, 0, sizeof(struct bnx2x_vf_mbx_msg));
 
-	BNX2X_TLV_APPEND(tlv, 0, type, len);
+	bnx2x_add_tlv(sc, &first_tlv->tl, 0, type, length);
 
 	/* Initialize header of the first tlv */
-	tlv->reply_offset = sizeof(mbox->query);
+	first_tlv->reply_offset = sizeof(mbox->query);
+}
+
+/* releases the mailbox */
+static void
+bnx2x_vf_finalize(struct bnx2x_softc *sc,
+		  __rte_unused struct vf_first_tlv *first_tlv)
+{
+	PMD_DRV_LOG(DEBUG, sc, "done sending [%d] tlv over vf pf channel",
+		    first_tlv->tl.type);
+
+	rte_spinlock_unlock(&sc->vf2pf_lock);
 }
 
 #define BNX2X_VF_CMD_ADDR_LO PXP_VF_ADDR_CSDM_GLOBAL_START
@@ -92,47 +110,44 @@ bnx2x_init_first_tlv(struct bnx2x_softc *sc, struct vf_first_tlv *tlv,
 #define BNX2X_VF_CHANNEL_TRIES 100
 
 static int
-bnx2x_do_req4pf(struct bnx2x_softc *sc, phys_addr_t phys_addr)
+bnx2x_do_req4pf(struct bnx2x_softc *sc, rte_iova_t phys_addr)
 {
 	uint8_t *status = &sc->vf2pf_mbox->resp.common_reply.status;
 	uint8_t i;
 
-	if (!*status) {
-		bnx2x_check_bull(sc);
-		if (sc->old_bulletin.valid_bitmap & (1 << CHANNEL_DOWN)) {
-			PMD_DRV_LOG(ERR, "channel is down. Aborting message sending");
-			*status = BNX2X_VF_STATUS_SUCCESS;
-			return 0;
-		}
-
-		REG_WR(sc, BNX2X_VF_CMD_ADDR_LO, U64_LO(phys_addr));
-		REG_WR(sc, BNX2X_VF_CMD_ADDR_HI, U64_HI(phys_addr));
-
-		/* memory barrier to ensure that FW can read phys_addr */
-		wmb();
-
-		REG_WR8(sc, BNX2X_VF_CMD_TRIGGER, 1);
-
-		/* Do several attempts until PF completes
-		 * "." is used to show progress
-		 */
-		for (i = 0; i < BNX2X_VF_CHANNEL_TRIES; i++) {
-			DELAY_MS(BNX2X_VF_CHANNEL_DELAY);
-			if (*status)
-				break;
-		}
-
-		if (!*status) {
-			PMD_DRV_LOG(ERR, "Response from PF timed out");
-			return -EAGAIN;
-		}
-	} else {
-		PMD_DRV_LOG(ERR, "status should be zero before message"
-				"to pf was sent");
+	if (*status) {
+		PMD_DRV_LOG(ERR, sc, "status should be zero before message"
+				 " to pf was sent");
 		return -EINVAL;
 	}
 
-	PMD_DRV_LOG(DEBUG, "Response from PF was received");
+	bnx2x_check_bull(sc);
+	if (sc->old_bulletin.valid_bitmap & (1 << CHANNEL_DOWN)) {
+		PMD_DRV_LOG(ERR, sc, "channel is down. Aborting message sending");
+		return -EINVAL;
+	}
+
+	REG_WR(sc, BNX2X_VF_CMD_ADDR_LO, U64_LO(phys_addr));
+	REG_WR(sc, BNX2X_VF_CMD_ADDR_HI, U64_HI(phys_addr));
+
+	/* memory barrier to ensure that FW can read phys_addr */
+	wmb();
+
+	REG_WR8(sc, BNX2X_VF_CMD_TRIGGER, 1);
+
+	/* Do several attempts until PF completes */
+	for (i = 0; i < BNX2X_VF_CHANNEL_TRIES; i++) {
+		DELAY_MS(BNX2X_VF_CHANNEL_DELAY);
+		if (*status)
+			break;
+	}
+
+	if (!*status) {
+		PMD_DRV_LOG(ERR, sc, "Response from PF timed out");
+		return -EAGAIN;
+	}
+
+	PMD_DRV_LOG(DEBUG, sc, "Response from PF was received");
 	return 0;
 }
 
@@ -147,19 +162,25 @@ static inline uint16_t bnx2x_check_me_flags(uint32_t val)
 #define BNX2X_ME_ANSWER_DELAY 100
 #define BNX2X_ME_ANSWER_TRIES 10
 
-static inline int bnx2x_read_vf_id(struct bnx2x_softc *sc)
+static inline int bnx2x_read_vf_id(struct bnx2x_softc *sc, uint32_t *vf_id)
 {
 	uint32_t val;
 	uint8_t i = 0;
 
 	while (i <= BNX2X_ME_ANSWER_TRIES) {
 		val = BNX2X_DB_READ(DOORBELL_ADDR(sc, 0));
-		if (bnx2x_check_me_flags(val))
-			return VF_ID(val);
+		if (bnx2x_check_me_flags(val)) {
+			PMD_DRV_LOG(DEBUG, sc,
+				    "valid register value: 0x%08x", val);
+			*vf_id = VF_ID(val);
+			return 0;
+		}
 
 		DELAY_MS(BNX2X_ME_ANSWER_DELAY);
 		i++;
 	}
+
+	PMD_DRV_LOG(ERR, sc, "Invalid register value: 0x%08x", val);
 
 	return -EINVAL;
 }
@@ -168,31 +189,23 @@ static inline int bnx2x_read_vf_id(struct bnx2x_softc *sc)
 #define BNX2X_VF_OBTAIN_MAC_FILTERS 1
 #define BNX2X_VF_OBTAIN_MC_FILTERS 10
 
-struct bnx2x_obtain_status {
-	int success;
-	int err_code;
-};
-
 static
-struct bnx2x_obtain_status bnx2x_loop_obtain_resources(struct bnx2x_softc *sc)
+int bnx2x_loop_obtain_resources(struct bnx2x_softc *sc)
 {
-	int tries = 0;
 	struct vf_acquire_resp_tlv *resp = &sc->vf2pf_mbox->resp.acquire_resp,
-								 *sc_resp = &sc->acquire_resp;
-	struct vf_resource_query    *res_query;
-	struct vf_resc            *resc;
-	struct bnx2x_obtain_status     status;
+				   *sc_resp = &sc->acquire_resp;
+	struct vf_resource_query   *res_query;
+	struct vf_resc		   *resc;
 	int res_obtained = false;
+	int tries = 0;
+	int rc;
 
 	do {
-		PMD_DRV_LOG(DEBUG, "trying to get resources");
+		PMD_DRV_LOG(DEBUG, sc, "trying to get resources");
 
-		if (bnx2x_do_req4pf(sc, sc->vf2pf_mbox_mapping.paddr)) {
-			/* timeout */
-			status.success = 0;
-			status.err_code = -EAGAIN;
-			return status;
-		}
+		rc = bnx2x_do_req4pf(sc, sc->vf2pf_mbox_mapping.paddr);
+		if (rc)
+			return rc;
 
 		memcpy(sc_resp, resp, sizeof(sc->acquire_resp));
 
@@ -200,15 +213,15 @@ struct bnx2x_obtain_status bnx2x_loop_obtain_resources(struct bnx2x_softc *sc)
 
 		/* check PF to request acceptance */
 		if (sc_resp->status == BNX2X_VF_STATUS_SUCCESS) {
-			PMD_DRV_LOG(DEBUG, "resources obtained successfully");
+			PMD_DRV_LOG(DEBUG, sc, "resources obtained successfully");
 			res_obtained = true;
 		} else if (sc_resp->status == BNX2X_VF_STATUS_NO_RESOURCES &&
-			tries < BNX2X_VF_OBTAIN_MAX_TRIES) {
-			PMD_DRV_LOG(DEBUG,
+			   tries < BNX2X_VF_OBTAIN_MAX_TRIES) {
+			PMD_DRV_LOG(DEBUG, sc,
 			   "PF cannot allocate requested amount of resources");
 
 			res_query = &sc->vf2pf_mbox->query[0].acquire.res_query;
-			resc     = &sc_resp->resc;
+			resc      = &sc_resp->resc;
 
 			/* PF refused our request. Try to decrease request params */
 			res_query->num_txqs         = min(res_query->num_txqs, resc->num_txqs);
@@ -220,30 +233,29 @@ struct bnx2x_obtain_status bnx2x_loop_obtain_resources(struct bnx2x_softc *sc)
 
 			memset(&sc->vf2pf_mbox->resp, 0, sizeof(union resp_tlvs));
 		} else {
-			PMD_DRV_LOG(ERR, "Resources cannot be obtained. Status of handling: %d. Aborting",
-					sc_resp->status);
-			status.success = 0;
-			status.err_code = -EAGAIN;
-			return status;
+			PMD_DRV_LOG(ERR, sc, "Failed to get the requested "
+					 "amount of resources: %d.",
+					 sc_resp->status);
+			return -EINVAL;
 		}
 	} while (!res_obtained);
 
-	status.success = 1;
-	return status;
+	return 0;
 }
 
 int bnx2x_vf_get_resources(struct bnx2x_softc *sc, uint8_t tx_count, uint8_t rx_count)
 {
 	struct vf_acquire_tlv *acq = &sc->vf2pf_mbox->query[0].acquire;
-	int vf_id;
-	struct bnx2x_obtain_status obtain_status;
+	uint32_t vf_id;
+	int rc;
 
 	bnx2x_vf_close(sc);
-	bnx2x_init_first_tlv(sc, &acq->first_tlv, BNX2X_VF_TLV_ACQUIRE, sizeof(*acq));
+	bnx2x_vf_prep(sc, &acq->first_tlv, BNX2X_VF_TLV_ACQUIRE, sizeof(*acq));
 
-	vf_id = bnx2x_read_vf_id(sc);
-	if (vf_id < 0)
-		return -EAGAIN;
+	if (bnx2x_read_vf_id(sc, &vf_id)) {
+		rc = -EAGAIN;
+		goto out;
+	}
 
 	acq->vf_id = vf_id;
 
@@ -256,19 +268,19 @@ int bnx2x_vf_get_resources(struct bnx2x_softc *sc, uint8_t tx_count, uint8_t rx_
 	acq->bulletin_addr = sc->pf2vf_bulletin_mapping.paddr;
 
 	/* Request physical port identifier */
-	BNX2X_TLV_APPEND(acq, acq->first_tlv.length,
-			 BNX2X_VF_TLV_PHYS_PORT_ID,
-			 sizeof(struct channel_tlv));
+	bnx2x_add_tlv(sc, acq, acq->first_tlv.tl.length,
+		      BNX2X_VF_TLV_PHYS_PORT_ID,
+		      sizeof(struct channel_tlv));
 
-	BNX2X_TLV_APPEND(acq,
-			 (acq->first_tlv.length + sizeof(struct channel_tlv)),
-			 BNX2X_VF_TLV_LIST_END,
-			 sizeof(struct channel_list_end_tlv));
+	bnx2x_add_tlv(sc, acq,
+		      (acq->first_tlv.tl.length + sizeof(struct channel_tlv)),
+		      BNX2X_VF_TLV_LIST_END,
+		      sizeof(struct channel_list_end_tlv));
 
 	/* requesting the resources in loop */
-	obtain_status = bnx2x_loop_obtain_resources(sc);
-	if (!obtain_status.success)
-		return obtain_status.err_code;
+	rc = bnx2x_loop_obtain_resources(sc);
+	if (rc)
+		goto out;
 
 	struct vf_acquire_resp_tlv sc_resp = sc->acquire_resp;
 
@@ -289,7 +301,7 @@ int bnx2x_vf_get_resources(struct bnx2x_softc *sc, uint8_t tx_count, uint8_t rx_
 	sc->doorbell_size = sc_resp.db_size;
 	sc->flags |= BNX2X_NO_WOL_FLAG | BNX2X_NO_ISCSI_OOO_FLAG | BNX2X_NO_ISCSI_FLAG | BNX2X_NO_FCOE_FLAG;
 
-	PMD_DRV_LOG(DEBUG, "status block count = %d, base status block = %x",
+	PMD_DRV_LOG(DEBUG, sc, "status block count = %d, base status block = %x",
 		sc->igu_sb_cnt, sc->igu_base_sb);
 	strncpy(sc->fw_ver, sc_resp.fw_ver, sizeof(sc->fw_ver));
 
@@ -299,7 +311,10 @@ int bnx2x_vf_get_resources(struct bnx2x_softc *sc, uint8_t tx_count, uint8_t rx_
 	else
 		eth_random_addr(sc->link_params.mac_addr);
 
-	return 0;
+out:
+	bnx2x_vf_finalize(sc, &acq->first_tlv);
+
+	return rc;
 }
 
 /* Ask PF to release VF's resources */
@@ -308,21 +323,30 @@ bnx2x_vf_close(struct bnx2x_softc *sc)
 {
 	struct vf_release_tlv *query;
 	struct vf_common_reply_tlv *reply = &sc->vf2pf_mbox->resp.common_reply;
-	int vf_id = bnx2x_read_vf_id(sc);
+	uint32_t vf_id;
+	int rc;
 
-	if (vf_id >= 0) {
-		query = &sc->vf2pf_mbox->query[0].release;
-		bnx2x_init_first_tlv(sc, &query->first_tlv, BNX2X_VF_TLV_RELEASE,
-				sizeof(*query));
+	query = &sc->vf2pf_mbox->query[0].release;
+	bnx2x_vf_prep(sc, &query->first_tlv, BNX2X_VF_TLV_RELEASE,
+		      sizeof(*query));
 
-		query->vf_id = vf_id;
-		BNX2X_TLV_APPEND(query, query->first_tlv.length, BNX2X_VF_TLV_LIST_END,
-				sizeof(struct channel_list_end_tlv));
-
-		bnx2x_do_req4pf(sc, sc->vf2pf_mbox_mapping.paddr);
-		if (reply->status != BNX2X_VF_STATUS_SUCCESS)
-			PMD_DRV_LOG(ERR, "Failed to release VF");
+	if (bnx2x_read_vf_id(sc, &vf_id)) {
+		rc = -EAGAIN;
+		goto out;
 	}
+
+	query->vf_id = vf_id;
+
+	bnx2x_add_tlv(sc, query, query->first_tlv.tl.length,
+		      BNX2X_VF_TLV_LIST_END,
+		      sizeof(struct channel_list_end_tlv));
+
+	rc = bnx2x_do_req4pf(sc, sc->vf2pf_mbox_mapping.paddr);
+	if (rc || reply->status != BNX2X_VF_STATUS_SUCCESS)
+		PMD_DRV_LOG(ERR, sc, "Failed to release VF");
+
+out:
+	bnx2x_vf_finalize(sc, &query->first_tlv);
 }
 
 /* Let PF know the VF status blocks phys_addrs */
@@ -331,11 +355,13 @@ bnx2x_vf_init(struct bnx2x_softc *sc)
 {
 	struct vf_init_tlv *query;
 	struct vf_common_reply_tlv *reply = &sc->vf2pf_mbox->resp.common_reply;
-	int i;
+	int i, rc;
+
+	PMD_INIT_FUNC_TRACE(sc);
 
 	query = &sc->vf2pf_mbox->query[0].init;
-	bnx2x_init_first_tlv(sc, &query->first_tlv, BNX2X_VF_TLV_INIT,
-			sizeof(*query));
+	bnx2x_vf_prep(sc, &query->first_tlv, BNX2X_VF_TLV_INIT,
+		      sizeof(*query));
 
 	FOR_EACH_QUEUE(sc, i) {
 		query->sb_addr[i] = (unsigned long)(sc->fp[i].sb_dma.paddr);
@@ -345,17 +371,23 @@ bnx2x_vf_init(struct bnx2x_softc *sc)
 	query->stats_addr = sc->fw_stats_data_mapping +
 		offsetof(struct bnx2x_fw_stats_data, queue_stats);
 
-	BNX2X_TLV_APPEND(query, query->first_tlv.length, BNX2X_VF_TLV_LIST_END,
-			sizeof(struct channel_list_end_tlv));
+	bnx2x_add_tlv(sc, query, query->first_tlv.tl.length,
+		      BNX2X_VF_TLV_LIST_END,
+		      sizeof(struct channel_list_end_tlv));
 
-	bnx2x_do_req4pf(sc, sc->vf2pf_mbox_mapping.paddr);
+	rc = bnx2x_do_req4pf(sc, sc->vf2pf_mbox_mapping.paddr);
+	if (rc)
+		goto out;
 	if (reply->status != BNX2X_VF_STATUS_SUCCESS) {
-		PMD_DRV_LOG(ERR, "Failed to init VF");
-		return -EINVAL;
+		PMD_DRV_LOG(ERR, sc, "Failed to init VF");
+		rc = -EINVAL;
+		goto out;
 	}
 
-	PMD_DRV_LOG(DEBUG, "VF was initialized");
-	return 0;
+	PMD_DRV_LOG(DEBUG, sc, "VF was initialized");
+out:
+	bnx2x_vf_finalize(sc, &query->first_tlv);
+	return rc;
 }
 
 void
@@ -363,46 +395,38 @@ bnx2x_vf_unload(struct bnx2x_softc *sc)
 {
 	struct vf_close_tlv *query;
 	struct vf_common_reply_tlv *reply = &sc->vf2pf_mbox->resp.common_reply;
-	struct vf_q_op_tlv *query_op;
-	int i, vf_id;
+	uint32_t vf_id;
+	int i, rc;
 
-	vf_id = bnx2x_read_vf_id(sc);
-	if (vf_id > 0) {
-		FOR_EACH_QUEUE(sc, i) {
-			query_op = &sc->vf2pf_mbox->query[0].q_op;
-			bnx2x_init_first_tlv(sc, &query_op->first_tlv,
-					BNX2X_VF_TLV_TEARDOWN_Q,
-					sizeof(*query_op));
+	PMD_INIT_FUNC_TRACE(sc);
 
-			query_op->vf_qid = i;
+	FOR_EACH_QUEUE(sc, i)
+		bnx2x_vf_teardown_queue(sc, i);
 
-			BNX2X_TLV_APPEND(query_op, query_op->first_tlv.length,
-					BNX2X_VF_TLV_LIST_END,
-					sizeof(struct channel_list_end_tlv));
+	bnx2x_vf_set_mac(sc, false);
 
-			bnx2x_do_req4pf(sc, sc->vf2pf_mbox_mapping.paddr);
-			if (reply->status != BNX2X_VF_STATUS_SUCCESS)
-				PMD_DRV_LOG(ERR,
-					    "Bad reply for vf_q %d teardown", i);
-		}
+	query = &sc->vf2pf_mbox->query[0].close;
+	bnx2x_vf_prep(sc, &query->first_tlv, BNX2X_VF_TLV_CLOSE,
+		      sizeof(*query));
 
-		bnx2x_vf_set_mac(sc, false);
-
-		query = &sc->vf2pf_mbox->query[0].close;
-		bnx2x_init_first_tlv(sc, &query->first_tlv, BNX2X_VF_TLV_CLOSE,
-				sizeof(*query));
-
-		query->vf_id = vf_id;
-
-		BNX2X_TLV_APPEND(query, query->first_tlv.length,
-				BNX2X_VF_TLV_LIST_END,
-				sizeof(struct channel_list_end_tlv));
-
-		bnx2x_do_req4pf(sc, sc->vf2pf_mbox_mapping.paddr);
-		if (reply->status != BNX2X_VF_STATUS_SUCCESS)
-			PMD_DRV_LOG(ERR,
-				    "Bad reply from PF for close message");
+	if (bnx2x_read_vf_id(sc, &vf_id)) {
+		rc = -EAGAIN;
+		goto out;
 	}
+
+	query->vf_id = vf_id;
+
+	bnx2x_add_tlv(sc, query, query->first_tlv.tl.length,
+		      BNX2X_VF_TLV_LIST_END,
+		      sizeof(struct channel_list_end_tlv));
+
+	rc = bnx2x_do_req4pf(sc, sc->vf2pf_mbox_mapping.paddr);
+	if (rc || reply->status != BNX2X_VF_STATUS_SUCCESS)
+		PMD_DRV_LOG(ERR, sc,
+			    "Bad reply from PF for close message");
+
+out:
+	bnx2x_vf_finalize(sc, &query->first_tlv);
 }
 
 static inline uint16_t
@@ -425,7 +449,7 @@ bnx2x_vf_rx_q_prep(struct bnx2x_softc *sc, struct bnx2x_fastpath *fp,
 
 	rxq = sc->rx_queues[fp->index];
 	if (!rxq) {
-		PMD_DRV_LOG(ERR, "RX queue %d is NULL", fp->index);
+		PMD_DRV_LOG(ERR, sc, "RX queue %d is NULL", fp->index);
 		return;
 	}
 
@@ -449,7 +473,7 @@ bnx2x_vf_tx_q_prep(struct bnx2x_softc *sc, struct bnx2x_fastpath *fp,
 
 	txq = sc->tx_queues[fp->index];
 	if (!txq) {
-		PMD_DRV_LOG(ERR, "TX queue %d is NULL", fp->index);
+		PMD_DRV_LOG(ERR, sc, "TX queue %d is NULL", fp->index);
 		return;
 	}
 
@@ -466,10 +490,11 @@ bnx2x_vf_setup_queue(struct bnx2x_softc *sc, struct bnx2x_fastpath *fp, int lead
 	struct vf_setup_q_tlv *query;
 	struct vf_common_reply_tlv *reply = &sc->vf2pf_mbox->resp.common_reply;
 	uint16_t flags = bnx2x_vf_q_flags(leading);
+	int rc;
 
 	query = &sc->vf2pf_mbox->query[0].setup_q;
-	bnx2x_init_first_tlv(sc, &query->first_tlv, BNX2X_VF_TLV_SETUP_Q,
-			sizeof(*query));
+	bnx2x_vf_prep(sc, &query->first_tlv, BNX2X_VF_TLV_SETUP_Q,
+		      sizeof(*query));
 
 	query->vf_qid = fp->index;
 	query->param_valid = VF_RXQ_VALID | VF_TXQ_VALID;
@@ -477,17 +502,51 @@ bnx2x_vf_setup_queue(struct bnx2x_softc *sc, struct bnx2x_fastpath *fp, int lead
 	bnx2x_vf_rx_q_prep(sc, fp, &query->rxq, flags);
 	bnx2x_vf_tx_q_prep(sc, fp, &query->txq, flags);
 
-	BNX2X_TLV_APPEND(query, query->first_tlv.length, BNX2X_VF_TLV_LIST_END,
-			sizeof(struct channel_list_end_tlv));
+	bnx2x_add_tlv(sc, query, query->first_tlv.tl.length,
+		      BNX2X_VF_TLV_LIST_END,
+		      sizeof(struct channel_list_end_tlv));
 
-	bnx2x_do_req4pf(sc, sc->vf2pf_mbox_mapping.paddr);
+	rc = bnx2x_do_req4pf(sc, sc->vf2pf_mbox_mapping.paddr);
+	if (rc)
+		goto out;
 	if (reply->status != BNX2X_VF_STATUS_SUCCESS) {
-		PMD_DRV_LOG(ERR, "Failed to setup VF queue[%d]",
+		PMD_DRV_LOG(ERR, sc, "Failed to setup VF queue[%d]",
 				 fp->index);
-		return -EINVAL;
+		rc = -EINVAL;
 	}
+out:
+	bnx2x_vf_finalize(sc, &query->first_tlv);
 
-	return 0;
+	return rc;
+}
+
+int
+bnx2x_vf_teardown_queue(struct bnx2x_softc *sc, int qid)
+{
+	struct vf_q_op_tlv *query_op;
+	struct vf_common_reply_tlv *reply = &sc->vf2pf_mbox->resp.common_reply;
+	int rc;
+
+	query_op = &sc->vf2pf_mbox->query[0].q_op;
+	bnx2x_vf_prep(sc, &query_op->first_tlv,
+		      BNX2X_VF_TLV_TEARDOWN_Q,
+		      sizeof(*query_op));
+
+	query_op->vf_qid = qid;
+
+	bnx2x_add_tlv(sc, query_op,
+		      query_op->first_tlv.tl.length,
+		      BNX2X_VF_TLV_LIST_END,
+		      sizeof(struct channel_list_end_tlv));
+
+	rc = bnx2x_do_req4pf(sc, sc->vf2pf_mbox_mapping.paddr);
+	if (rc || reply->status != BNX2X_VF_STATUS_SUCCESS)
+		PMD_DRV_LOG(ERR, sc,
+			    "Bad reply for vf_q %d teardown", qid);
+
+	bnx2x_vf_finalize(sc, &query_op->first_tlv);
+
+	return rc;
 }
 
 int
@@ -495,9 +554,10 @@ bnx2x_vf_set_mac(struct bnx2x_softc *sc, int set)
 {
 	struct vf_set_q_filters_tlv *query;
 	struct vf_common_reply_tlv *reply;
+	int rc;
 
 	query = &sc->vf2pf_mbox->query[0].set_q_filters;
-	bnx2x_init_first_tlv(sc, &query->first_tlv, BNX2X_VF_TLV_SET_Q_FILTERS,
+	bnx2x_vf_prep(sc, &query->first_tlv, BNX2X_VF_TLV_SET_Q_FILTERS,
 			sizeof(*query));
 
 	query->vf_qid = sc->fp->index;
@@ -511,10 +571,13 @@ bnx2x_vf_set_mac(struct bnx2x_softc *sc, int set)
 
 	rte_memcpy(query->filters[0].mac, sc->link_params.mac_addr, ETH_ALEN);
 
-	BNX2X_TLV_APPEND(query, query->first_tlv.length, BNX2X_VF_TLV_LIST_END,
-			sizeof(struct channel_list_end_tlv));
+	bnx2x_add_tlv(sc, query, query->first_tlv.tl.length,
+		      BNX2X_VF_TLV_LIST_END,
+		      sizeof(struct channel_list_end_tlv));
 
-	bnx2x_do_req4pf(sc, sc->vf2pf_mbox_mapping.paddr);
+	rc = bnx2x_do_req4pf(sc, sc->vf2pf_mbox_mapping.paddr);
+	if (rc)
+		goto out;
 	reply = &sc->vf2pf_mbox->resp.common_reply;
 
 	while (BNX2X_VF_STATUS_FAILURE == reply->status &&
@@ -525,16 +588,20 @@ bnx2x_vf_set_mac(struct bnx2x_softc *sc, int set)
 		rte_memcpy(query->filters[0].mac, sc->pf2vf_bulletin->mac,
 				ETH_ALEN);
 
-		bnx2x_do_req4pf(sc, sc->vf2pf_mbox_mapping.paddr);
+		rc = bnx2x_do_req4pf(sc, sc->vf2pf_mbox_mapping.paddr);
+		if (rc)
+			goto out;
 	}
 
 	if (BNX2X_VF_STATUS_SUCCESS != reply->status) {
-		PMD_DRV_LOG(ERR, "Bad reply from PF for SET MAC message: %d",
+		PMD_DRV_LOG(ERR, sc, "Bad reply from PF for SET MAC message: %d",
 				reply->status);
-		return -EINVAL;
+		rc = -EINVAL;
 	}
+out:
+	bnx2x_vf_finalize(sc, &query->first_tlv);
 
-	return 0;
+	return rc;
 }
 
 int
@@ -543,15 +610,17 @@ bnx2x_vf_config_rss(struct bnx2x_softc *sc,
 {
 	struct vf_rss_tlv *query;
 	struct vf_common_reply_tlv *reply = &sc->vf2pf_mbox->resp.common_reply;
+	int rc;
 
 	query = &sc->vf2pf_mbox->query[0].update_rss;
 
-	bnx2x_init_first_tlv(sc, &query->first_tlv, BNX2X_VF_TLV_UPDATE_RSS,
+	bnx2x_vf_prep(sc, &query->first_tlv, BNX2X_VF_TLV_UPDATE_RSS,
 			sizeof(*query));
 
 	/* add list termination tlv */
-	BNX2X_TLV_APPEND(query, query->first_tlv.length, BNX2X_VF_TLV_LIST_END,
-			sizeof(struct channel_list_end_tlv));
+	bnx2x_add_tlv(sc, query, query->first_tlv.tl.length,
+		      BNX2X_VF_TLV_LIST_END,
+		      sizeof(struct channel_list_end_tlv));
 
 	rte_memcpy(query->rss_key, params->rss_key, sizeof(params->rss_key));
 	query->rss_key_size = T_ETH_RSS_KEY;
@@ -562,13 +631,18 @@ bnx2x_vf_config_rss(struct bnx2x_softc *sc,
 	query->rss_result_mask = params->rss_result_mask;
 	query->rss_flags = params->rss_flags;
 
-	bnx2x_do_req4pf(sc, sc->vf2pf_mbox_mapping.paddr);
-	if (reply->status != BNX2X_VF_STATUS_SUCCESS) {
-		PMD_DRV_LOG(ERR, "Failed to configure RSS");
-		return -EINVAL;
-	}
+	rc = bnx2x_do_req4pf(sc, sc->vf2pf_mbox_mapping.paddr);
+	if (rc)
+		goto out;
 
-	return 0;
+	if (reply->status != BNX2X_VF_STATUS_SUCCESS) {
+		PMD_DRV_LOG(ERR, sc, "Failed to configure RSS");
+		rc = -EINVAL;
+	}
+out:
+	bnx2x_vf_finalize(sc, &query->first_tlv);
+
+	return rc;
 }
 
 int
@@ -576,27 +650,56 @@ bnx2x_vf_set_rx_mode(struct bnx2x_softc *sc)
 {
 	struct vf_set_q_filters_tlv *query;
 	struct vf_common_reply_tlv *reply = &sc->vf2pf_mbox->resp.common_reply;
-	unsigned long tx_mask;
+	int rc;
 
 	query = &sc->vf2pf_mbox->query[0].set_q_filters;
-	bnx2x_init_first_tlv(sc, &query->first_tlv, BNX2X_VF_TLV_SET_Q_FILTERS,
+	bnx2x_vf_prep(sc, &query->first_tlv, BNX2X_VF_TLV_SET_Q_FILTERS,
 			sizeof(*query));
 
 	query->vf_qid = 0;
 	query->flags = BNX2X_VF_RX_MASK_CHANGED;
 
-	if (bnx2x_fill_accept_flags(sc, sc->rx_mode, &query->rx_mask, &tx_mask)) {
-		return -EINVAL;
+	switch (sc->rx_mode) {
+	case BNX2X_RX_MODE_NONE: /* no Rx */
+		query->rx_mask = VFPF_RX_MASK_ACCEPT_NONE;
+		break;
+	case BNX2X_RX_MODE_NORMAL:
+		query->rx_mask = VFPF_RX_MASK_ACCEPT_MATCHED_MULTICAST;
+		query->rx_mask |= VFPF_RX_MASK_ACCEPT_MATCHED_UNICAST;
+		query->rx_mask |= VFPF_RX_MASK_ACCEPT_BROADCAST;
+		break;
+	case BNX2X_RX_MODE_ALLMULTI:
+		query->rx_mask = VFPF_RX_MASK_ACCEPT_ALL_MULTICAST;
+		query->rx_mask |= VFPF_RX_MASK_ACCEPT_MATCHED_UNICAST;
+		query->rx_mask |= VFPF_RX_MASK_ACCEPT_BROADCAST;
+		break;
+	case BNX2X_RX_MODE_ALLMULTI_PROMISC:
+	case BNX2X_RX_MODE_PROMISC:
+		query->rx_mask = VFPF_RX_MASK_ACCEPT_ALL_UNICAST;
+		query->rx_mask |= VFPF_RX_MASK_ACCEPT_ALL_MULTICAST;
+		query->rx_mask |= VFPF_RX_MASK_ACCEPT_BROADCAST;
+		break;
+	default:
+		PMD_DRV_LOG(ERR, sc, "BAD rx mode (%d)", sc->rx_mode);
+		rc = -EINVAL;
+		goto out;
 	}
 
-	BNX2X_TLV_APPEND(query, query->first_tlv.length, BNX2X_VF_TLV_LIST_END,
-			sizeof(struct channel_list_end_tlv));
+	bnx2x_add_tlv(sc, query, query->first_tlv.tl.length,
+		      BNX2X_VF_TLV_LIST_END,
+		      sizeof(struct channel_list_end_tlv));
 
-	bnx2x_do_req4pf(sc, sc->vf2pf_mbox_mapping.paddr);
+	rc = bnx2x_do_req4pf(sc, sc->vf2pf_mbox_mapping.paddr);
+	if (rc)
+		goto out;
+
 	if (reply->status != BNX2X_VF_STATUS_SUCCESS) {
-		PMD_DRV_LOG(ERR, "Failed to set RX mode");
-		return -EINVAL;
+		PMD_DRV_LOG(ERR, sc, "Failed to set RX mode");
+		rc = -EINVAL;
 	}
 
-	return 0;
+out:
+	bnx2x_vf_finalize(sc, &query->first_tlv);
+
+	return rc;
 }

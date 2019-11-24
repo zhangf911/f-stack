@@ -1,32 +1,5 @@
-..  BSD LICENSE
-    Copyright(c) 2010-2014 Intel Corporation. All rights reserved.
-    All rights reserved.
-
-    Redistribution and use in source and binary forms, with or without
-    modification, are permitted provided that the following conditions
-    are met:
-
-    * Redistributions of source code must retain the above copyright
-    notice, this list of conditions and the following disclaimer.
-    * Redistributions in binary form must reproduce the above copyright
-    notice, this list of conditions and the following disclaimer in
-    the documentation and/or other materials provided with the
-    distribution.
-    * Neither the name of Intel Corporation nor the names of its
-    contributors may be used to endorse or promote products derived
-    from this software without specific prior written permission.
-
-    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-    "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-    A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-    OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-    SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-    LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-    DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-    THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-    OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+..  SPDX-License-Identifier: BSD-3-Clause
+    Copyright(c) 2010-2014 Intel Corporation.
 
 VMDQ and DCB Forwarding Sample Application
 ==========================================
@@ -86,26 +59,11 @@ No command-line options are taken by this application apart from the standard EA
 Compiling the Application
 -------------------------
 
-#.  Go to the examples directory:
 
-    .. code-block:: console
 
-        export RTE_SDK=/path/to/rte_sdk
-        cd ${RTE_SDK}/examples/vmdq_dcb
+To compile the sample application see :doc:`compiling`.
 
-#.  Set the target (a default target is used if not specified). For example:
-
-    .. code-block:: console
-
-        export RTE_TARGET=x86_64-native-linuxapp-gcc
-
-    See the *DPDK Getting Started Guide* for possible RTE_TARGET values.
-
-#.  Build the application:
-
-    .. code-block:: console
-
-        make
+The application is located in the ``vmdq_dcb`` sub-directory.
 
 Running the Application
 -----------------------
@@ -114,7 +72,7 @@ To run the example in a linuxapp environment:
 
 .. code-block:: console
 
-    user@target:~$ ./build/vmdq_dcb -c f -n 4 -- -p 0x3 --nb-pools 32 --nb-tcs 4
+    user@target:~$ ./build/vmdq_dcb -l 0-3 -n 4 -- -p 0x3 --nb-pools 32 --nb-tcs 4
 
 Refer to the *DPDK Getting Started Guide* for general information on running applications and
 the Environment Abstraction Layer (EAL) options.
@@ -144,10 +102,6 @@ a default structure is provided for VMDQ and DCB configuration to be filled in l
         .rxmode = {
             .mq_mode        = ETH_MQ_RX_VMDQ_DCB,
             .split_hdr_size = 0,
-            .header_split   = 0, /**< Header Split disabled */
-            .hw_ip_checksum = 0, /**< IP checksum offload disabled */
-            .hw_vlan_filter = 0, /**< VLAN filtering disabled */
-            .jumbo_frame    = 0, /**< Jumbo Frame Support disabled */
         },
         .txmode = {
             .mq_mode = ETH_MQ_TX_VMDQ_DCB,

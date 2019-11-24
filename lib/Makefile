@@ -14,21 +14,47 @@ S=${TOPDIR}/freebsd
 MACHINE_INCLUDES_ROOT:=${CURDIR}/machine_include
 OVERRIDE_INCLUDES_ROOT:=${CURDIR}/include
 X86_INCLUDES=0
+PREFIX=/usr/local
+PREFIX_LIB=${PREFIX}/lib
+PREFIX_INCLUDE=/usr/local/include
+PREFIX_BIN=/usr/local/bin
+F-STACK_CONF=/etc/f-stack.conf
+F-STACK_VERSION=1.20
 
 HOST_OS:=$(shell uname -s)
-#DEBUG=-O0 -gdwarf-2 -g3
+
+#DEBUG=-O0 -gdwarf-2 -g3 -Wno-format-truncation
+
+FF_KNI=1
+#FF_NETGRAPH=1
+#FF_IPFW=1
+#FF_USE_PAGE_ARRAY=1
+FF_INET6=1
+
+
+include ${TOPDIR}/mk/kern.pre.mk
 
 ifeq ($(FF_DPDK),)
+ifeq (${MACHINE_CPUARCH},aarch64)
+    FF_DPDK=${TOPDIR}/dpdk/build
+else
     FF_DPDK=${TOPDIR}/dpdk/x86_64-native-linuxapp-gcc
 endif
+endif
 
-DPDK_CFLAGS= -Wall -Werror -include ${FF_DPDK}/include/rte_config.h
+ifdef RTE_SDK
+ifeq (${MACHINE_CPUARCH},aarch64) 
+    FF_DPDK=${RTE_SDK}/build
+else
+    FF_DPDK=${RTE_SDK}/x86_64-native-linuxapp-gcc
+endif
+endif
+
+DPDK_CFLAGS= -Wall -Wno-deprecated-declarations -Werror -include ${FF_DPDK}/include/rte_config.h
 DPDK_CFLAGS+= -march=native -DRTE_MACHINE_CPUFLAG_SSE -DRTE_MACHINE_CPUFLAG_SSE2 -DRTE_MACHINE_CPUFLAG_SSE3
 DPDK_CFLAGS+= -DRTE_MACHINE_CPUFLAG_SSSE3 -DRTE_MACHINE_CPUFLAG_SSE4_1 -DRTE_MACHINE_CPUFLAG_SSE4_2
 DPDK_CFLAGS+= -DRTE_COMPILE_TIME_CPUFLAGS=RTE_CPUFLAG_SSE,RTE_CPUFLAG_SSE2,RTE_CPUFLAG_SSE3,RTE_CPUFLAG_SSSE3,RTE_CPUFLAG_SSE4_1,RTE_CPUFLAG_SSE4_2
 DPDK_CFLAGS+= -I${FF_DPDK}/include
-
-include ${TOPDIR}/mk/kern.pre.mk
 
 KERNPREINCLUDES:= ${INCLUDES}
 INCLUDES= -I${OVERRIDE_INCLUDES_ROOT} ${KERNPREINCLUDES}
@@ -38,11 +64,35 @@ INCLUDES+= -I./opt
 # Include search path for files that only include host OS headers
 HOST_INCLUDES= -I.
 ifndef DEBUG
-HOST_CFLAGS = -O2 -frename-registers  -funswitch-loops -fweb
+HOST_CFLAGS = -O2 -frename-registers  -funswitch-loops -fweb -Wno-format-truncation
 else
 HOST_CFLAGS = ${DEBUG} 
 endif
+
+ifdef FF_KNI
+HOST_CFLAGS+= -DFF_KNI
+endif
+
 HOST_CFLAGS+= ${DPDK_CFLAGS}
+HOST_CFLAGS+= ${CONF_CFLAGS}
+
+ifdef FF_NETGRAPH
+HOST_CFLAGS+= -DFF_NETGRAPH
+endif
+
+ifdef FF_IPFW
+HOST_CFLAGS+= -DFF_IPFW
+endif
+
+ifdef FF_USE_PAGE_ARRAY
+HOST_CFLAGS+= -DFF_USE_PAGE_ARRAY
+endif
+
+ifdef FF_INET6
+HOST_CFLAGS+= -DINET6
+CFLAGS+= -DINET6
+endif
+
 HOST_C= ${CC} -c $(HOST_CFLAGS) ${HOST_INCLUDES} ${WERROR} ${PROF} $<
 
 
@@ -66,6 +116,13 @@ ifneq (${COMPILER_TYPE},clang)
 CFLAGS += -mno-thumb-interwork
 endif
 
+endif
+
+#
+# fix the MACHINE_CPUARCH to match the FreeBSD directory name
+#
+ifeq (${MACHINE_CPUARCH},aarch64)
+MACHINE_CPUARCH=arm64
 endif
 
 
@@ -94,6 +151,9 @@ endif
 
 CFLAGS+= -DFSTACK
 
+# add for LVS tcp option toa, disabled by default
+# CFLAGS+= -DLVS_TCPOPT_TOA
+
 VPATH+= $S/${MACHINE_CPUARCH}/${MACHINE_CPUARCH}
 VPATH+= $S/kern
 VPATH+= $S/crypto
@@ -105,107 +165,133 @@ VPATH+= $S/crypto/rijndael
 VPATH+= $S/crypto/sha2
 VPATH+= $S/crypto/siphash
 VPATH+= $S/net
+ifdef FF_NETGRAPH
+VPATH+= $S/netgraph
+endif
 VPATH+= $S/netinet
+VPATH+= $S/netinet/libalias
 VPATH+= $S/netinet/cc
+ifdef FF_INET6
+VPATH+= $S/netinet6
+endif
 VPATH+= $S/netipsec
+ifdef FF_IPFW
+VPATH+= $S/netpfil/ipfw
+endif
 VPATH+= $S/opencrypto
 VPATH+= $S/vm
 VPATH+= $S/libkern
 
 
-FF_SRCS+=			\
-	ff_compat.c    \
-	ff_glue.c      \
-	ff_freebsd_init.c      \
-	ff_init_main.c \
-	ff_kern_condvar.c \
-	ff_kern_environment.c  \
-	ff_kern_intr.c  \
-	ff_kern_subr.c \
-	ff_kern_synch.c \
-	ff_kern_timeout.c \
-	ff_lock.c      \
-	ff_syscall_wrapper.c \
-	ff_subr_prf.c    \
-	ff_vfs_ops.c  \
-	ff_veth.c  \
-	ff_epoll.c
+FF_SRCS+=                     \
+	ff_compat.c           \
+	ff_glue.c             \
+	ff_freebsd_init.c     \
+	ff_init_main.c        \
+	ff_kern_condvar.c     \
+	ff_kern_environment.c \
+	ff_kern_intr.c        \
+	ff_kern_subr.c        \
+	ff_kern_synch.c       \
+	ff_kern_timeout.c     \
+	ff_lock.c             \
+	ff_syscall_wrapper.c  \
+	ff_subr_prf.c         \
+	ff_vfs_ops.c          \
+	ff_veth.c             \
+	ff_route.c
 
-FF_HOST_SRCS+= \
+ifdef FF_NETGRAPH
+FF_SRCS+=                   \
+        ff_ng_base.c        \
+        ff_ngctl.c
+endif
+
+FF_HOST_SRCS+=              \
 	ff_host_interface.c \
-	ff_config.c    \
-	ff_ini_parser.c  \
-	ff_dpdk_if.c \
-	ff_dpdk_kni.c \
-	ff_dpdk_pcap.c \
-	ff_init.c
+	ff_config.c         \
+	ff_ini_parser.c     \
+	ff_dpdk_if.c        \
+	ff_dpdk_pcap.c      \
+	ff_epoll.c          \
+	ff_init.c	
+
+ifdef FF_KNI
+FF_HOST_SRCS+=              \
+	ff_dpdk_kni.c
+endif
+
+ifdef FF_USE_PAGE_ARRAY
+FF_HOST_SRCS+=              \
+  ff_memory.c
+endif
 
 ifdef FF_IPSEC
-CRYPTO_ASM_SRCS+=			\
-	aesencdec_${MACHINE_CPUARCH}.S	\
+CRYPTO_ASM_SRCS+=                       \
+	aesencdec_${MACHINE_CPUARCH}.S  \
 	aeskeys_${MACHINE_CPUARCH}.S
 
-CRYPTO_SRCS+=			\
-	aesni.c			\
-	aesni_wrap.c		\
-	bf_ecb.c		\
-	bf_enc.c		\
-	bf_skey.c		\
-	camellia.c		\
-	camellia-api.c		\
-	des_ecb.c		\
-	des_enc.c		\
-	des_setkey.c		\
-	rijndael-alg-fst.c	\
-	rijndael-api.c		\
-	sha1.c			    \
+CRYPTO_SRCS+=               \
+	aesni.c	            \
+	aesni_wrap.c        \
+	bf_ecb.c            \
+	bf_enc.c            \
+	bf_skey.c           \
+	camellia.c          \
+	camellia-api.c      \
+	des_ecb.c           \
+	des_enc.c           \
+	des_setkey.c        \
+	rijndael-alg-fst.c  \
+	rijndael-api.c      \
+	sha1.c              \
 	sha256c.c           \
 	sha512c.c           \
 	siphash.c
 else
-CRYPTO_SRCS+=			\
+CRYPTO_SRCS+=               \
 	sha1.c              \
 	siphash.c
 endif
 
-KERN_SRCS+=			\
-	kern_descrip.c		\
-	kern_event.c		\
-	kern_fail.c		\
-	kern_khelp.c		\
-	kern_hhook.c		\
-	kern_linker.c		\
-	kern_mbuf.c		\
-	kern_module.c		\
-	kern_mtxpool.c		\
-	kern_ntptime.c		\
-	kern_osd.c		\
-	kern_sysctl.c		\
-	kern_tc.c		\
-	kern_uuid.c		\
-	link_elf.c		\
-	md5c.c			\
+KERN_SRCS+=                 \
+	kern_descrip.c      \
+	kern_event.c        \
+	kern_fail.c         \
+	kern_khelp.c        \
+	kern_hhook.c        \
+	kern_linker.c       \
+	kern_mbuf.c         \
+	kern_module.c       \
+	kern_mtxpool.c      \
+	kern_ntptime.c      \
+	kern_osd.c          \
+	kern_sysctl.c       \
+	kern_tc.c           \
+	kern_uuid.c         \
+	link_elf.c          \
+	md5c.c              \
 	subr_capability.c   \
 	subr_counter.c      \
-	subr_eventhandler.c	\
-	subr_kobj.c		\
-	subr_lock.c		\
-	subr_module.c		\
-	subr_param.c		\
-	subr_pcpu.c		\
-	subr_sbuf.c		\
-	subr_taskqueue.c	\
-	subr_unit.c		\
-	sys_capability.c	\
-	sys_generic.c		\
-	sys_socket.c		\
-	uipc_accf.c		\
-	uipc_mbuf.c		\
-	uipc_mbuf2.c		\
-	uipc_domain.c		\
-	uipc_sockbuf.c		\
+	subr_eventhandler.c \
+	subr_kobj.c         \
+	subr_lock.c         \
+	subr_module.c       \
+	subr_param.c        \
+	subr_pcpu.c         \
+	subr_sbuf.c         \
+	subr_taskqueue.c    \
+	subr_unit.c         \
+	sys_capability.c    \
+	sys_generic.c       \
+	sys_socket.c        \
+	uipc_accf.c         \
+	uipc_mbuf.c         \
+	uipc_mbuf2.c        \
+	uipc_domain.c       \
+	uipc_sockbuf.c      \
 	uipc_socket.c       \
-    uipc_syscalls.c
+	uipc_syscalls.c
 
 
 KERN_MHEADERS+=		\
@@ -217,52 +303,125 @@ KERN_MHEADERS+=		\
 KERN_MSRCS+=		\
 	linker_if.m
 
+ifeq (${MACHINE_CPUARCH},arm64)
+LIBKERN_SRCS+=		 \
+	bcd.c		 \
+	crc32.c          \
+	inet_ntoa.c	 \
+	jenkins_hash.c   \
+	strlcpy.c	 \
+	strnlen.c        \
+	zlib.c		 \
+	fls.c		 \
+	flsl.c
+else
+LIBKERN_SRCS+=		 \
+	bcd.c		 \
+	crc32.c          \
+	inet_ntoa.c	 \
+	jenkins_hash.c   \
+	strlcpy.c	 \
+	strnlen.c        \
+	zlib.c		 
+endif
 
-LIBKERN_SRCS+=		\
-	bcd.c		\
-	inet_ntoa.c	\
-	jenkins_hash.c  \
-	strlcpy.c	\
-	strnlen.c
 
-
-MACHINE_SRCS+=		\
+MACHINE_SRCS+=		 \
 	in_cksum.c
 
 
-NET_SRCS+=		\
-	bpf.c		\
-	if.c		\
-	if_clone.c	\
-	if_dead.c	\
-	if_ethersubr.c	\
-	if_loop.c	\
-	if_llatbl.c	\
-	in_fib.c	\
- 	ip_reass.c	\
-	netisr.c	\
-	pfil.c		\
-	radix.c		\
-	raw_cb.c	\
-	raw_usrreq.c	\
-	route.c		\
-	rtsock.c
+NET_SRCS+=		 \
+	bpf.c		 \
+	bridgestp.c      \
+	if.c		 \
+	if_bridge.c      \
+	if_clone.c	 \
+	if_dead.c	 \
+	if_ethersubr.c	 \
+	if_loop.c	 \
+	if_llatbl.c	 \
+	if_media.c       \
+	if_spppfr.c      \
+	if_spppsubr.c    \
+	if_vlan.c        \
+	if_vxlan.c       \
+	in_fib.c	 \
+	in_gif.c         \
+	ip_reass.c	 \
+	netisr.c	 \
+	pfil.c		 \
+	radix.c		 \
+	raw_cb.c	 \
+	raw_usrreq.c	 \
+	route.c		 \
+	rtsock.c         \
+	slcompress.c
 
+ifdef FF_NETGRAPH
+NETGRAPH_SRCS +=         \
+	ng_async.c       \
+	ng_atmllc.c      \
+	ng_bridge.c      \
+	ng_car.c         \
+	ng_cisco.c       \
+	ng_deflate.c     \
+	ng_echo.c        \
+	ng_eiface.c      \
+	ng_etf.c         \
+	ng_ether.c       \
+	ng_ether_echo.c  \
+	ng_frame_relay.c \
+	ng_gif.c         \
+	ng_gif_demux.c   \
+	ng_hole.c        \
+	ng_hub.c         \
+	ng_iface.c       \
+	ng_ip_input.c    \
+	ng_ipfw.c        \
+	ng_ksocket.c     \
+	ng_l2tp.c        \
+	ng_lmi.c         \
+	ng_nat.c         \
+	ng_one2many.c    \
+	ng_parse.c       \
+	ng_patch.c       \
+	ng_pipe.c        \
+	ng_ppp.c         \
+	ng_pppoe.c       \
+	ng_pptpgre.c     \
+	ng_pred1.c       \
+	ng_rfc1490.c     \
+	ng_sample.c      \
+	ng_socket.c      \
+	ng_source.c      \
+	ng_split.c       \
+	ng_sppp.c        \
+	ng_tag.c         \
+	ng_tcpmss.c      \
+	ng_tee.c         \
+	ng_UI.c          \
+	ng_vjc.c         \
+	ng_vlan.c
+endif
 
 NETINET_SRCS+=		\
-	ip_carp.c	\
 	if_ether.c	\
+	if_gif.c        \
 	igmp.c		\
 	in.c		\
 	in_mcast.c	\
 	in_pcb.c	\
 	in_proto.c	\
 	in_rmx.c	\
+	ip_carp.c	\
+	ip_divert.c     \
+	ip_ecn.c        \
 	ip_encap.c	\
 	ip_fastfwd.c	\
 	ip_icmp.c	\
 	ip_id.c		\
 	ip_input.c	\
+	ip_mroute.c     \
 	ip_options.c	\
 	ip_output.c	\
 	raw_ip.c	\
@@ -281,14 +440,80 @@ NETINET_SRCS+=		\
 	tcp_timewait.c	\
 	tcp_usrreq.c	\
 	udp_usrreq.c	\
-	cc.c		    \
+	cc.c		\
 	cc_newreno.c    \
 	cc_htcp.c       \
-	cc_cubic.c
+	cc_cubic.c      \
+	alias.c         \
+	alias_db.c      \
+	alias_mod.c     \
+	alias_proxy.c   \
+	alias_sctp.c    \
+	alias_util.c
+
+ifdef FF_INET6
+NETINET6_SRCS+=		\
+	dest6.c		\
+	frag6.c		\
+	icmp6.c		\
+	in6.c		\
+	in6_ifattach.c	\
+	in6_mcast.c	\
+	in6_pcb.c	\
+	in6_pcbgroup.c	\
+	in6_proto.c	\
+	in6_rmx.c	\
+	in6_src.c	\
+	ip6_forward.c	\
+	ip6_id.c	\
+	ip6_input.c	\
+	ip6_fastfwd.c	\
+	ip6_mroute.c	\
+	ip6_output.c	\
+	mld6.c		\
+	nd6.c		\
+	nd6_nbr.c	\
+	nd6_rtr.c	\
+	raw_ip6.c	\
+	route6.c	\
+	scope6.c	\
+	send.c		\
+	udp6_usrreq.c	\
+	in6_cksum.c	\
+	in6_fib.c	\
+	in6_gif.c
+	#ip6_gre.c
+	#ip6_ipsec.c
+	#sctp6_usrreq.c
+	#in6_rss.c
+ifndef FF_KNI
+FF_HOST_SRCS+=         \
+        ff_dpdk_kni.c
+endif
+endif
+
+ifdef FF_IPFW
+NETIPFW_SRCS+=             \
+	ip_fw_dynamic.c \
+	ip_fw_eaction.c \
+	ip_fw_iface.c   \
+	ip_fw_log.c     \
+	ip_fw_nat.c     \
+	ip_fw_pfil.c    \
+	ip_fw_sockopt.c \
+	ip_fw_table.c   \
+	ip_fw_table_algo.c  \
+	ip_fw_table_value.c \
+	ip_fw2.c
+endif
 
 ifdef FF_IPSEC
 NETINET_SRCS+=		\
 	ip_ipsec.c
+ifdef FF_INET6
+NETINET6_SRCS+=		\
+	ip6_ipsec.c
+endif
 endif
 
 
@@ -308,9 +533,6 @@ endif
 
 # only if TCP_SIGNTAURE is defined
 #xform_tcp.c
-
-NETINET6_SRCS+=
-
 
 ifdef FF_IPSEC
 OPENCRYPTO_SRCS+=	\
@@ -343,10 +565,14 @@ MSRCS+= $(patsubst %.m,%.c,${OPENCRYPTO_MSRCS})
 ASM_SRCS = ${CRYPTO_ASM_SRCS}
 
 SRCS=  ${FF_SRCS} ${CRYPTO_SRCS} ${KERN_SRCS} ${LIBKERN_SRCS} ${MACHINE_SRCS}
-SRCS+= ${MSRCS} ${NET_SRCS} ${NETINET_SRCS} ${NETINET6_SRCS} ${NETIPSEC_SRCS} ${OPENCRYPTO_SRCS} ${VM_SRCS}
+SRCS+= ${MSRCS} ${NET_SRCS} ${NETGRAPH_SRCS} ${NETINET_SRCS} ${NETINET6_SRCS}
+SRCS+= ${NETIPSEC_SRCS} ${NETIPFW_SRCS} ${OPENCRYPTO_SRCS} ${VM_SRCS}
 
 # If witness is enabled.
 # SRCS+= ${KERN_WITNESS_SRCS}
+
+# Extra FreeBSD kernel module srcs.
+SRCS+= ${KMOD_SRCS}
 
 HOST_SRCS = ${FF_HOST_SRCS}
 
@@ -363,7 +589,7 @@ all: libfstack.a
 # externally available.
 #
 libfstack.a: machine_includes ff_api.symlist ${MHEADERS} ${MSRCS} ${HOST_OBJS} ${ASM_OBJS} ${OBJS}
-	${LD} -r -o $*.ro ${ASM_OBJS} ${OBJS}
+	${LD} -d -r -o $*.ro ${ASM_OBJS} ${OBJS}
 	nm $*.ro  | grep -v ' U ' | cut -d ' ' -f 3 > $*_localize_list.tmp
 	objcopy --localize-symbols=$*_localize_list.tmp $*.ro 
 	rm $*_localize_list.tmp
@@ -420,4 +646,35 @@ vnode_if_typedef.h:
 	${AWK} -f $S/tools/vnode_if.awk $S/kern/vnode_if.src -q
 
 include ${TOPDIR}/mk/kern.mk
+
+install:
+	rm -rf ${PREFIX_LIB}/libfstack.a.${F-STACK_VERSION}
+	rm -rf ${PREFIX_LIB}/libfstack.a
+	rm -rf ${PREFIX_INCLUDE}/ff_config.h
+	rm -rf ${PREFIX_INCLUDE}/ff_api.h
+	rm -rf ${PREFIX_INCLUDE}/ff_event.h
+	rm -rf ${PREFIX_INCLUDE}/ff_errno.h
+	rm -rf ${PREFIX_INCLUDE}/ff_epoll.h
+	rm -rf ${PREFIX_BIN}/ff_start
+
+	cp -f libfstack.a ${PREFIX_LIB}/libfstack.a.${F-STACK_VERSION}
+	ln -sf ${PREFIX_LIB}/libfstack.a.${F-STACK_VERSION} ${PREFIX_LIB}/libfstack.a
+	cp -f ff_config.h ${PREFIX_INCLUDE}/ff_config.h
+	cp -f ff_api.h ${PREFIX_INCLUDE}/ff_api.h
+	cp -f ff_event.h ${PREFIX_INCLUDE}/ff_event.h
+	cp -f ff_errno.h ${PREFIX_INCLUDE}/ff_errno.h
+	cp -f ff_epoll.h ${PREFIX_INCLUDE}/ff_epoll.h
+	cp -f ${TOPDIR}/start.sh ${PREFIX_BIN}/ff_start
+	test -f '${F-STACK_CONF}' || cp -f ${TOPDIR}/config.ini ${F-STACK_CONF}
+
+uninstall:
+	rm -rf ${PREFIX_LIB}/libfstack.a.${F-STACK_VERSION}
+	rm -rf ${PREFIX_LIB}/libfstack.a
+	rm -rf ${PREFIX_INCLUDE}/ff_config.h
+	rm -rf ${PREFIX_INCLUDE}/ff_api.h
+	rm -rf ${PREFIX_INCLUDE}/ff_event.h
+	rm -rf ${PREFIX_INCLUDE}/ff_errno.h
+	rm -rf ${PREFIX_INCLUDE}/ff_epoll.h
+	rm -rf ${PREFIX_BIN}/ff_start
+	rm -rf ${F-STACK_CONF}
 

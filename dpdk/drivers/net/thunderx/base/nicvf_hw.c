@@ -1,33 +1,5 @@
-/*
- *   BSD LICENSE
- *
- *   Copyright (C) Cavium networks Ltd. 2016.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Cavium networks nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright(c) 2016 Cavium, Inc
  */
 
 #include <unistd.h>
@@ -140,8 +112,15 @@ nicvf_base_init(struct nicvf *nic)
 	if (nic->subsystem_device_id == 0)
 		return NICVF_ERR_BASE_INIT;
 
-	if (nicvf_hw_version(nic) == NICVF_PASS2)
-		nic->hwcap |= NICVF_CAP_TUNNEL_PARSING;
+	if (nicvf_hw_version(nic) == PCI_SUB_DEVICE_ID_CN88XX_PASS2_NICVF)
+		nic->hwcap |= NICVF_CAP_TUNNEL_PARSING | NICVF_CAP_CQE_RX2;
+
+	if (nicvf_hw_version(nic) == PCI_SUB_DEVICE_ID_CN81XX_NICVF)
+		nic->hwcap |= NICVF_CAP_TUNNEL_PARSING | NICVF_CAP_CQE_RX2;
+
+	if (nicvf_hw_version(nic) == PCI_SUB_DEVICE_ID_CN83XX_NICVF)
+		nic->hwcap |= NICVF_CAP_TUNNEL_PARSING | NICVF_CAP_CQE_RX2 |
+				NICVF_CAP_DISABLE_APAD;
 
 	return NICVF_OK;
 }
@@ -441,7 +420,8 @@ nicvf_qsize_regbit(uint32_t len, uint32_t len_shift)
 {
 	int val;
 
-	val = ((uint32_t)log2(len) - len_shift);
+	val = nicvf_log2_u32(len) - len_shift;
+
 	assert(val >= NICVF_QSIZE_MIN_VAL);
 	assert(val <= NICVF_QSIZE_MAX_VAL);
 	return val;
@@ -494,14 +474,14 @@ nicvf_qsize_rbdr_roundup(uint32_t val)
 }
 
 int
-nicvf_qset_rbdr_precharge(struct nicvf *nic, uint16_t ridx,
-			  rbdr_pool_get_handler handler,
-			  void *opaque, uint32_t max_buffs)
+nicvf_qset_rbdr_precharge(void *dev, struct nicvf *nic,
+			  uint16_t ridx, rbdr_pool_get_handler handler,
+			  uint32_t max_buffs)
 {
 	struct rbdr_entry_t *desc, *desc0;
 	struct nicvf_rbdr *rbdr = nic->rbdr;
 	uint32_t count;
-	nicvf_phys_addr_t phy;
+	nicvf_iova_addr_t phy;
 
 	assert(rbdr != NULL);
 	desc = rbdr->desc;
@@ -511,7 +491,7 @@ nicvf_qset_rbdr_precharge(struct nicvf *nic, uint16_t ridx,
 		if (count >= max_buffs)
 			break;
 		desc0 = desc + count;
-		phy = handler(opaque);
+		phy = handler(dev, nic);
 		if (phy) {
 			desc0->full_addr = phy;
 			count++;
@@ -578,6 +558,7 @@ nicvf_qset_sq_config(struct nicvf *nic, uint16_t qidx, struct nicvf_txq *txq)
 	nicvf_queue_reg_write(nic, NIC_QSET_SQ_0_7_BASE, qidx, txq->phys);
 
 	/* Enable send queue  & set queue size */
+	sq_cfg.cq_limit = 0;
 	sq_cfg.ena = 1;
 	sq_cfg.reset = 0;
 	sq_cfg.ldwb = 0;
@@ -718,6 +699,37 @@ nicvf_vlan_hw_strip(struct nicvf *nic, bool enable)
 	else
 		val &= ~((STRIP_SECOND_VLAN | STRIP_FIRST_VLAN) << 25);
 
+	nic->vlan_strip = enable;
+	nicvf_reg_write(nic, NIC_VNIC_RQ_GEN_CFG, val);
+}
+
+void
+nicvf_first_skip_config(struct nicvf *nic, uint8_t num_dwords)
+{
+	uint64_t val;
+
+	val = nicvf_reg_read(nic, NIC_VNIC_RQ_GEN_CFG);
+	val &= ~(0xfULL);
+	val |= (num_dwords & 0xf);
+
+	nicvf_reg_write(nic, NIC_VNIC_RQ_GEN_CFG, val);
+}
+
+void
+nicvf_apad_config(struct nicvf *nic, bool enable)
+{
+	uint64_t val;
+
+	/* APAD always enabled in this device */
+	if (!(nic->hwcap & NICVF_CAP_DISABLE_APAD))
+		return;
+
+	val = nicvf_reg_read(nic, NIC_VNIC_RQ_GEN_CFG);
+	if (enable)
+		val &= ~(1ULL << NICVF_QS_RQ_DIS_APAD_SHIFT);
+	else
+		val |= (1ULL << NICVF_QS_RQ_DIS_APAD_SHIFT);
+
 	nicvf_reg_write(nic, NIC_VNIC_RQ_GEN_CFG, val);
 }
 
@@ -776,7 +788,7 @@ nicvf_rss_reta_update(struct nicvf *nic, uint8_t *tbl, uint32_t max_count)
 		return NICVF_ERR_RSS_GET_SZ;
 
 	assert(rss->rss_size > 0);
-	rss->hash_bits = (uint8_t)log2(rss->rss_size);
+	rss->hash_bits = (uint8_t)nicvf_log2_u32(rss->rss_size);
 	for (idx = 0; idx < rss->rss_size && idx < max_count; idx++)
 		rss->ind_tbl[idx] = tbl[idx];
 
@@ -797,7 +809,8 @@ nicvf_rss_reta_query(struct nicvf *nic, uint8_t *tbl, uint32_t max_count)
 		return NICVF_ERR_RSS_GET_SZ;
 
 	assert(rss->rss_size > 0);
-	rss->hash_bits = (uint8_t)log2(rss->rss_size);
+	rss->hash_bits = (uint8_t)nicvf_log2_u32(rss->rss_size);
+
 	for (idx = 0; idx < rss->rss_size && idx < max_count; idx++)
 		tbl[idx] = rss->ind_tbl[idx];
 

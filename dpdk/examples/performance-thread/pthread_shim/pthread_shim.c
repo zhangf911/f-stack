@@ -1,41 +1,11 @@
-/*-
- *   BSD LICENSE
- *
- *   Copyright(c) 2015 Intel Corporation. All rights reserved.
- *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright(c) 2015 Intel Corporation
  */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
 #include <errno.h>
-#define __USE_GNU
 #include <sched.h>
 #include <dlfcn.h>
 
@@ -47,6 +17,21 @@
 #define RTE_LOGTYPE_PTHREAD_SHIM RTE_LOGTYPE_USER3
 
 #define POSIX_ERRNO(x)  (x)
+
+/* some releases of FreeBSD 10, e.g. 10.0, don't have CPU_COUNT macro */
+#ifndef CPU_COUNT
+#define CPU_COUNT(x) __cpu_count(x)
+
+static inline unsigned int
+__cpu_count(const rte_cpuset_t *cpuset)
+{
+	unsigned int i, count = 0;
+	for (i = 0; i < RTE_MAX_LCORE; i++)
+		if (CPU_ISSET(i, cpuset))
+			count++;
+	return count;
+}
+#endif
 
 /*
  * this flag determines at run time if we override pthread
@@ -159,7 +144,7 @@ int (*f_pthread_setschedparam)
 int (*f_pthread_yield)
 	(void);
 int (*f_pthread_setaffinity_np)
-	(pthread_t thread, size_t cpusetsize, const cpu_set_t *cpuset);
+	(pthread_t thread, size_t cpusetsize, const rte_cpuset_t *cpuset);
 int (*f_nanosleep)
 	(const struct timespec *req, struct timespec *rem);
 } _sys_pthread_funcs = {
@@ -187,10 +172,7 @@ static void *__libc_dl_handle = RTLD_NEXT;
  * The constructor function initialises the
  * function pointers for pthread library functions
  */
-void
-pthread_intercept_ctor(void)__attribute__((constructor));
-void
-pthread_intercept_ctor(void)
+RTE_INIT(pthread_intercept_ctor)
 {
 	override = 0;
 	/*
@@ -382,7 +364,7 @@ int pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex)
 int
 pthread_create(pthread_t *__restrict tid,
 		const pthread_attr_t *__restrict attr,
-		void *(func) (void *),
+		lthread_func_t func,
 	       void *__restrict arg)
 {
 	if (override) {
@@ -390,11 +372,11 @@ pthread_create(pthread_t *__restrict tid,
 
 		if (attr != NULL) {
 			/* determine CPU being requested */
-			cpu_set_t cpuset;
+			rte_cpuset_t cpuset;
 
 			CPU_ZERO(&cpuset);
 			pthread_attr_getaffinity_np(attr,
-						sizeof(cpu_set_t),
+						sizeof(rte_cpuset_t),
 						&cpuset);
 
 			if (CPU_COUNT(&cpuset) != 1)
@@ -407,7 +389,7 @@ pthread_create(pthread_t *__restrict tid,
 			}
 		}
 		return lthread_create((struct lthread **)tid, lcore,
-				      (void (*)(void *))func, arg);
+				      func, arg);
 	}
 	return _sys_pthread_funcs.f_pthread_create(tid, attr, func, arg);
 }
@@ -576,15 +558,26 @@ int pthread_rwlock_wrlock(pthread_rwlock_t *a)
 	return _sys_pthread_funcs.f_pthread_rwlock_wrlock(a);
 }
 
-int pthread_yield(void)
+#ifdef RTE_EXEC_ENV_LINUXAPP
+int
+pthread_yield(void)
 {
 	if (override) {
 		lthread_yield();
 		return 0;
 	}
 	return _sys_pthread_funcs.f_pthread_yield();
-
 }
+#else
+void
+pthread_yield(void)
+{
+	if (override)
+		lthread_yield();
+	else
+		_sys_pthread_funcs.f_pthread_yield();
+}
+#endif
 
 pthread_t pthread_self(void)
 {
@@ -686,7 +679,7 @@ int nanosleep(const struct timespec *req, struct timespec *rem)
 
 int
 pthread_setaffinity_np(pthread_t thread, size_t cpusetsize,
-		       const cpu_set_t *cpuset)
+		       const rte_cpuset_t *cpuset)
 {
 	if (override) {
 		/* we only allow affinity with a single CPU */

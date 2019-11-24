@@ -1,33 +1,5 @@
-/*
- *   BSD LICENSE
- *
- *   Copyright (C) Cavium networks Ltd. 2016.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Cavium networks nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright(c) 2016 Cavium, Inc
  */
 
 #include <assert.h>
@@ -183,6 +155,26 @@ nicvf_handle_mbx_intr(struct nicvf *nic)
 		nic->speed = mbx.link_status.speed;
 		nic->pf_acked = true;
 		break;
+	case NIC_MBOX_MSG_ALLOC_SQS:
+		assert_primary(nic);
+		if (mbx.sqs_alloc.qs_count != nic->sqs_count) {
+			nicvf_log_error("Received %" PRIu8 "/%" PRIu8
+			                " secondary qsets",
+			                mbx.sqs_alloc.qs_count,
+			                nic->sqs_count);
+			abort();
+		}
+		for (i = 0; i < mbx.sqs_alloc.qs_count; i++) {
+			if (mbx.sqs_alloc.svf[i] != nic->snicvf[i]->vf_id) {
+				nicvf_log_error("Received secondary qset[%zu] "
+				                "ID %" PRIu8 " expected %"
+				                PRIu8, i, mbx.sqs_alloc.svf[i],
+				                nic->snicvf[i]->vf_id);
+				abort();
+			}
+		}
+		nic->pf_acked = true;
+		break;
 	default:
 		nicvf_log_error("Invalid message from PF, msg_id=0x%hhx %s",
 				mbx.msg.msg, nicvf_mbox_msg_str(mbx.msg.msg));
@@ -308,13 +300,35 @@ nicvf_mbox_qset_config(struct nicvf *nic, struct pf_qs_cfg *qs_cfg)
 {
 	struct nic_mbx mbx = { .msg = { 0 } };
 
-#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#if NICVF_BYTE_ORDER == NICVF_BIG_ENDIAN
 	qs_cfg->be = 1;
 #endif
 	/* Send a mailbox msg to PF to config Qset */
 	mbx.msg.msg = NIC_MBOX_MSG_QS_CFG;
 	mbx.qs.num = nic->vf_id;
+	mbx.qs.sqs_count = nic->sqs_count;
 	mbx.qs.cfg = qs_cfg->value;
+	return nicvf_mbox_send_msg_to_pf(nic, &mbx);
+}
+
+int
+nicvf_mbox_request_sqs(struct nicvf *nic)
+{
+	struct nic_mbx mbx = { .msg = { 0 } };
+	size_t i;
+
+	assert_primary(nic);
+	assert(nic->sqs_count > 0);
+	assert(nic->sqs_count <= MAX_SQS_PER_VF);
+
+	mbx.sqs_alloc.msg = NIC_MBOX_MSG_ALLOC_SQS;
+	mbx.sqs_alloc.spec = 1;
+	mbx.sqs_alloc.qs_count = nic->sqs_count;
+
+	/* Set no of Rx/Tx queues in each of the SQsets */
+	for (i = 0; i < nic->sqs_count; i++)
+		mbx.sqs_alloc.svf[i] = nic->snicvf[i]->vf_id;
+
 	return nicvf_mbox_send_msg_to_pf(nic, &mbx);
 }
 

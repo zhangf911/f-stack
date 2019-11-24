@@ -1,32 +1,5 @@
-..  BSD LICENSE
-    Copyright(c) 2010-2014 Intel Corporation. All rights reserved.
-    All rights reserved.
-
-    Redistribution and use in source and binary forms, with or without
-    modification, are permitted provided that the following conditions
-    are met:
-
-    * Redistributions of source code must retain the above copyright
-    notice, this list of conditions and the following disclaimer.
-    * Redistributions in binary form must reproduce the above copyright
-    notice, this list of conditions and the following disclaimer in
-    the documentation and/or other materials provided with the
-    distribution.
-    * Neither the name of Intel Corporation nor the names of its
-    contributors may be used to endorse or promote products derived
-    from this software without specific prior written permission.
-
-    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-    "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-    A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-    OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-    SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-    LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-    DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-    THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-    OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+..  SPDX-License-Identifier: BSD-3-Clause
+    Copyright(c) 2010-2014 Intel Corporation.
 
 .. _compiling_sample_apps:
 
@@ -54,7 +27,7 @@ the following variables must be exported:
 
 The following is an example of creating the ``helloworld`` application, which runs
 in the DPDK FreeBSD environment. While the example demonstrates compiling
-using gcc version 4.8, compiling with clang will be similar, except that the ``CC=``
+using gcc version 4.9, compiling with clang will be similar, except that the ``CC=``
 parameter can probably be omitted. The ``helloworld`` example may be found in the
 ``${RTE_SDK}/examples`` directory.
 
@@ -72,7 +45,7 @@ in the build directory.
     setenv RTE_SDK $HOME/DPDK
     setenv RTE_TARGET x86_64-native-bsdapp-gcc
 
-    gmake CC=gcc48
+    gmake CC=gcc49
       CC main.o
       LD helloworld
       INSTALL-APP helloworld
@@ -96,7 +69,7 @@ in the build directory.
     cd my_rte_app/
     setenv RTE_TARGET x86_64-native-bsdapp-gcc
 
-    gmake CC=gcc48
+    gmake CC=gcc49
       CC main.o
       LD helloworld
       INSTALL-APP helloworld
@@ -119,7 +92,7 @@ The following is the list of options that can be given to the EAL:
 
 .. code-block:: console
 
-    ./rte-app -c COREMASK [-n NUM] [-b <domain:bus:devid.func>] \
+    ./rte-app -l CORELIST [-n NUM] [-b <domain:bus:devid.func>] \
               [-r NUM] [-v] [--proc-type <primary|secondary|auto>]
 
 .. note::
@@ -130,9 +103,10 @@ The following is the list of options that can be given to the EAL:
 
 The EAL options for FreeBSD are as follows:
 
-*   ``-c COREMASK``:
+*   ``-c COREMASK`` or ``-l CORELIST``:
     A hexadecimal bit mask of the cores to run on.  Note that core numbering
-    can change between platforms and should be determined beforehand.
+    can change between platforms and should be determined beforehand. The corelist
+    is a list of cores to use instead of a core mask.
 
 *   ``-n NUM``:
     Number of memory channels per processor socket.
@@ -154,6 +128,9 @@ The EAL options for FreeBSD are as follows:
 *   ``--proc-type``:
     The type of process instance.
 
+*   ``-m MB``:
+    Memory to allocate from hugepages, regardless of processor socket.
+
 Other options, specific to Linux and are not supported under FreeBSD are as follows:
 
 *   ``socket-mem``:
@@ -162,20 +139,19 @@ Other options, specific to Linux and are not supported under FreeBSD are as foll
 *   ``--huge-dir``:
     The directory where hugetlbfs is mounted.
 
+*   ``mbuf-pool-ops-name``:
+    Pool ops name for mbuf to use.
+
 *   ``--file-prefix``:
     The prefix text used for hugepage filenames.
 
-*   ``-m MB``:
-    Memory to allocate from hugepages, regardless of processor socket.
-    It is recommended that ``--socket-mem`` be used instead of this option.
-
-The ``-c`` option is mandatory; the others are optional.
+The ``-c`` or ``-l`` option is mandatory; the others are optional.
 
 Copy the DPDK application binary to your target, then run the application
 as follows (assuming the platform has four memory channels, and that cores 0-3
 are present and are to be used for running the application)::
 
-    ./helloworld -c f -n 4
+    ./helloworld -l 0-3 -n 4
 
 .. note::
 

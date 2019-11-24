@@ -1,35 +1,6 @@
-/*******************************************************************************
-
-Copyright (c) 2001-2015, Intel Corporation
-All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-
- 1. Redistributions of source code must retain the above copyright notice,
-    this list of conditions and the following disclaimer.
-
- 2. Redistributions in binary form must reproduce the above copyright
-    notice, this list of conditions and the following disclaimer in the
-    documentation and/or other materials provided with the distribution.
-
- 3. Neither the name of the Intel Corporation nor the names of its
-    contributors may be used to endorse or promote products derived from
-    this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
-LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-POSSIBILITY OF SUCH DAMAGE.
-
-***************************************************************************/
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright(c) 2001-2018
+ */
 
 #ifndef _IXGBE_API_H_
 #define _IXGBE_API_H_
@@ -45,6 +16,8 @@ extern s32 ixgbe_init_ops_82599(struct ixgbe_hw *hw);
 extern s32 ixgbe_init_ops_X540(struct ixgbe_hw *hw);
 extern s32 ixgbe_init_ops_X550(struct ixgbe_hw *hw);
 extern s32 ixgbe_init_ops_X550EM(struct ixgbe_hw *hw);
+extern s32 ixgbe_init_ops_X550EM_x(struct ixgbe_hw *hw);
+extern s32 ixgbe_init_ops_X550EM_a(struct ixgbe_hw *hw);
 extern s32 ixgbe_init_ops_vf(struct ixgbe_hw *hw);
 
 s32 ixgbe_set_mac_type(struct ixgbe_hw *hw);
@@ -131,7 +104,7 @@ s32 ixgbe_set_vlvf(struct ixgbe_hw *hw, u32 vlan, u32 vind,
 s32 ixgbe_fc_enable(struct ixgbe_hw *hw);
 s32 ixgbe_setup_fc(struct ixgbe_hw *hw);
 s32 ixgbe_set_fw_drv_ver(struct ixgbe_hw *hw, u8 maj, u8 min, u8 build,
-			 u8 ver);
+			 u8 ver, u16 len, char *driver_ver);
 s32 ixgbe_get_thermal_sensor_data(struct ixgbe_hw *hw);
 s32 ixgbe_init_thermal_sensor_thresh(struct ixgbe_hw *hw);
 void ixgbe_set_mta(struct ixgbe_hw *hw, u8 *mc_addr);
@@ -141,7 +114,7 @@ s32 ixgbe_read_analog_reg8(struct ixgbe_hw *hw, u32 reg, u8 *val);
 s32 ixgbe_write_analog_reg8(struct ixgbe_hw *hw, u32 reg, u8 val);
 s32 ixgbe_init_uta_tables(struct ixgbe_hw *hw);
 s32 ixgbe_read_i2c_eeprom(struct ixgbe_hw *hw, u8 byte_offset, u8 *eeprom_data);
-u32 ixgbe_get_supported_physical_layer(struct ixgbe_hw *hw);
+u64 ixgbe_get_supported_physical_layer(struct ixgbe_hw *hw);
 s32 ixgbe_enable_rx_dma(struct ixgbe_hw *hw, u32 regval);
 s32 ixgbe_disable_sec_rx_path(struct ixgbe_hw *hw);
 s32 ixgbe_enable_sec_rx_path(struct ixgbe_hw *hw);
@@ -212,6 +185,7 @@ void ixgbe_disable_mdd(struct ixgbe_hw *hw);
 void ixgbe_enable_mdd(struct ixgbe_hw *hw);
 void ixgbe_mdd_event(struct ixgbe_hw *hw, u32 *vf_bitmap);
 void ixgbe_restore_mdd_vf(struct ixgbe_hw *hw, u32 vf);
+bool ixgbe_fw_recovery_mode(struct ixgbe_hw *hw);
 s32 ixgbe_enter_lplu(struct ixgbe_hw *hw);
 s32 ixgbe_handle_lasi(struct ixgbe_hw *hw);
 void ixgbe_set_rate_select_speed(struct ixgbe_hw *hw, ixgbe_link_speed speed);

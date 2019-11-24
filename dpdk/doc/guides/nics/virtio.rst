@@ -1,32 +1,5 @@
-..  BSD LICENSE
-    Copyright(c) 2010-2015 Intel Corporation. All rights reserved.
-    All rights reserved.
-
-    Redistribution and use in source and binary forms, with or without
-    modification, are permitted provided that the following conditions
-    are met:
-
-    * Redistributions of source code must retain the above copyright
-    notice, this list of conditions and the following disclaimer.
-    * Redistributions in binary form must reproduce the above copyright
-    notice, this list of conditions and the following disclaimer in
-    the documentation and/or other materials provided with the
-    distribution.
-    * Neither the name of Intel Corporation nor the names of its
-    contributors may be used to endorse or promote products derived
-    from this software without specific prior written permission.
-
-    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-    "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-    A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-    OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-    SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-    LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-    DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-    THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-    OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+..  SPDX-License-Identifier: BSD-3-Clause
+    Copyright(c) 2010-2015 Intel Corporation.
 
 Poll Mode Driver for Emulated Virtio NIC
 ========================================
@@ -34,15 +7,13 @@ Poll Mode Driver for Emulated Virtio NIC
 Virtio is a para-virtualization framework initiated by IBM, and supported by KVM hypervisor.
 In the Data Plane Development Kit (DPDK),
 we provide a virtio Poll Mode Driver (PMD) as a software solution, comparing to SRIOV hardware solution,
+
 for fast guest VM to guest VM communication and guest VM to host communication.
 
 Vhost is a kernel acceleration module for virtio qemu backend.
 The DPDK extends kni to support vhost raw socket interface,
 which enables vhost to directly read/ write packets from/to a physical port.
 With this enhancement, virtio could achieve quite promising performance.
-
-In future release, we will also make enhancement to vhost backend,
-releasing peak performance of virtio PMD driver.
 
 For basic qemu-KVM installation and other Intel EM poll mode driver in guest VM,
 please refer to Chapter "Driver for VM Emulated Devices".
@@ -73,19 +44,27 @@ In this release, the virtio PMD driver provides the basic functionality of packe
 
 *   It supports multicast packets and promiscuous mode.
 
-*   The descriptor number for the Rx/Tx queue is hard-coded to be 256 by qemu.
+*   The descriptor number for the Rx/Tx queue is hard-coded to be 256 by qemu 2.7 and below.
     If given a different descriptor number by the upper application,
     the virtio PMD generates a warning and fall back to the hard-coded value.
+    Rx queue size can be configurable and up to 1024 since qemu 2.8 and above. Rx queue size is 256
+    by default. Tx queue size is still hard-coded to be 256.
 
 *   Features of mac/vlan filter are supported, negotiation with vhost/backend are needed to support them.
-    When backend can't support vlan filter, virtio app on guest should disable vlan filter to make sure
-    the virtio port is configured correctly. E.g. specify '--disable-hw-vlan' in testpmd command line.
+    When backend can't support vlan filter, virtio app on guest should not enable vlan filter in order
+    to make sure the virtio port is configured correctly. E.g. do not specify '--enable-hw-vlan' in testpmd
+    command line.
 
-*   RTE_PKTMBUF_HEADROOM should be defined larger than sizeof(struct virtio_net_hdr), which is 10 bytes.
+*   "RTE_PKTMBUF_HEADROOM" should be defined
+    no less than "sizeof(struct virtio_net_hdr_mrg_rxbuf)", which is 12 bytes when mergeable or
+    "VIRTIO_F_VERSION_1" is set.
+    no less than "sizeof(struct virtio_net_hdr)", which is 10 bytes, when using non-mergeable.
 
 *   Virtio does not support runtime configuration.
 
 *   Virtio supports Link State interrupt.
+
+*   Virtio supports Rx interrupt (so far, only support 1:1 mapping for queue/interrupt).
 
 *   Virtio supports software vlan stripping and inserting.
 
@@ -128,7 +107,7 @@ Host2VM communication example
 
     .. code-block:: console
 
-        examples/kni/build/app/kni -c 0xf -n 4 -- -p 0x1 -P --config="(0,1,3)"
+        examples/kni/build/app/kni -l 0-3 -n 4 -- -p 0x1 -P --config="(0,1,3)"
 
     This command generates one network device vEth0 for physical port.
     If specify more physical ports, the generated network device will be vEth1, vEth2, and so on.
@@ -172,7 +151,7 @@ Host2VM communication example
         modprobe uio
         echo 512 > /sys/devices/system/node/node0/hugepages/hugepages-2048kB/nr_hugepages
         modprobe uio_pci_generic
-        python tools/dpdk-devbind.py -b uio_pci_generic 00:03.0
+        python usertools/dpdk-devbind.py -b uio_pci_generic 00:03.0
 
     We use testpmd as the forwarding application in this example.
 
@@ -222,7 +201,7 @@ The packet transmission flow is:
 Virtio PMD Rx/Tx Callbacks
 --------------------------
 
-Virtio driver has 3 Rx callbacks and 2 Tx callbacks.
+Virtio driver has 4 Rx callbacks and 3 Tx callbacks.
 
 Rx callbacks:
 
@@ -236,6 +215,9 @@ Rx callbacks:
    Vector version without mergeable Rx buffer support, also fixes the available
    ring indexes and uses vector instructions to optimize performance.
 
+#. ``virtio_recv_mergeable_pkts_inorder``:
+   In-order version with mergeable Rx buffer support.
+
 Tx callbacks:
 
 #. ``virtio_xmit_pkts``:
@@ -244,6 +226,8 @@ Tx callbacks:
 #. ``virtio_xmit_pkts_simple``:
    Vector version fixes the available ring indexes to optimize performance.
 
+#. ``virtio_xmit_pkts_inorder``:
+   In-order version.
 
 By default, the non-vector callbacks are used:
 
@@ -255,7 +239,7 @@ By default, the non-vector callbacks are used:
 
 Vector callbacks will be used when:
 
-*   ``txq_flags`` is set to ``VIRTIO_SIMPLE_FLAGS`` (0xF01), which implies:
+*   ``txmode.offloads`` is set to ``0x0``, which implies:
 
     *   Single segment is specified.
 
@@ -273,4 +257,98 @@ The corresponding callbacks are:
 Example of using the vector version of the virtio poll mode driver in
 ``testpmd``::
 
-   testpmd -c 0x7 -n 4 -- -i --txqflags=0xF01 --rxq=1 --txq=1 --nb-cores=1
+   testpmd -l 0-2 -n 4 -- -i --tx-offloads=0x0 --rxq=1 --txq=1 --nb-cores=1
+
+In-order callbacks only work on simulated virtio user vdev.
+
+*   For Rx: If mergeable Rx buffers is enabled and in-order is enabled then
+    ``virtio_xmit_pkts_inorder`` is used.
+
+*   For Tx: If in-order is enabled then ``virtio_xmit_pkts_inorder`` is used.
+
+Interrupt mode
+--------------
+
+.. _virtio_interrupt_mode:
+
+There are three kinds of interrupts from a virtio device over PCI bus: config
+interrupt, Rx interrupts, and Tx interrupts. Config interrupt is used for
+notification of device configuration changes, especially link status (lsc).
+Interrupt mode is translated into Rx interrupts in the context of DPDK.
+
+.. Note::
+
+   Virtio PMD already has support for receiving lsc from qemu when the link
+   status changes, especially when vhost user disconnects. However, it fails
+   to do that if the VM is created by qemu 2.6.2 or below, since the
+   capability to detect vhost user disconnection is introduced in qemu 2.7.0.
+
+Prerequisites for Rx interrupts
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+To support Rx interrupts,
+#. Check if guest kernel supports VFIO-NOIOMMU:
+
+    Linux started to support VFIO-NOIOMMU since 4.8.0. Make sure the guest
+    kernel is compiled with:
+
+    .. code-block:: console
+
+        CONFIG_VFIO_NOIOMMU=y
+
+#. Properly set msix vectors when starting VM:
+
+    Enable multi-queue when starting VM, and specify msix vectors in qemu
+    cmdline. (N+1) is the minimum, and (2N+2) is mostly recommended.
+
+    .. code-block:: console
+
+        $(QEMU) ... -device virtio-net-pci,mq=on,vectors=2N+2 ...
+
+#. In VM, insert vfio module in NOIOMMU mode:
+
+    .. code-block:: console
+
+        modprobe vfio enable_unsafe_noiommu_mode=1
+        modprobe vfio-pci
+
+#. In VM, bind the virtio device with vfio-pci:
+
+    .. code-block:: console
+
+        python usertools/dpdk-devbind.py -b vfio-pci 00:03.0
+
+Example
+~~~~~~~
+
+Here we use l3fwd-power as an example to show how to get started.
+
+    Example:
+
+    .. code-block:: console
+
+        $ l3fwd-power -l 0-1 -- -p 1 -P --config="(0,0,1)" \
+                                               --no-numa --parse-ptype
+
+
+Virtio PMD arguments
+--------------------
+
+The user can specify below argument in devargs.
+
+#.  ``vdpa``:
+
+    A virtio device could also be driven by vDPA (vhost data path acceleration)
+    driver, and works as a HW vhost backend. This argument is used to specify
+    a virtio device needs to work in vDPA mode.
+    (Default: 0 (disabled))
+
+#. ``mrg_rxbuf``:
+
+    It is used to enable virtio device mergeable Rx buffer feature.
+    (Default: 1 (enabled))
+
+#. ``in_order``:
+
+    It is used to enable virtio device in-order feature.
+    (Default: 1 (enabled))

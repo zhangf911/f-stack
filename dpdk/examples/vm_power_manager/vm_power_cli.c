@@ -1,34 +1,5 @@
-/*-
- *   BSD LICENSE
- *
- *   Copyright(c) 2010-2014 Intel Corporation. All rights reserved.
- *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright(c) 2010-2014 Intel Corporation
  */
 
 #include <stdlib.h>
@@ -520,6 +491,10 @@ cmd_set_cpu_freq_mask_parsed(void *parsed_result, struct cmdline *cl,
 		ret = power_manager_scale_mask_min(res->core_mask);
 	else if (!strcmp(res->cmd , "max"))
 		ret = power_manager_scale_mask_max(res->core_mask);
+	else if (!strcmp(res->cmd, "enable_turbo"))
+		ret = power_manager_enable_turbo_mask(res->core_mask);
+	else if (!strcmp(res->cmd, "disable_turbo"))
+		ret = power_manager_disable_turbo_mask(res->core_mask);
 	if (ret < 0) {
 		cmdline_printf(cl, "Error scaling core_mask(0x%"PRIx64") '%s' , not "
 				"all cores specified have been scaled\n",
@@ -535,14 +510,13 @@ cmdline_parse_token_num_t cmd_set_cpu_freq_mask_core_mask =
 			core_mask, UINT64);
 cmdline_parse_token_string_t cmd_set_cpu_freq_mask_result =
 	TOKEN_STRING_INITIALIZER(struct cmd_set_cpu_freq_mask_result,
-			cmd, "up#down#min#max");
+			cmd, "up#down#min#max#enable_turbo#disable_turbo");
 
 cmdline_parse_inst_t cmd_set_cpu_freq_mask_set = {
 	.f = cmd_set_cpu_freq_mask_parsed,
 	.data = NULL,
-	.help_str = "set_cpu_freq <core_mask> <up|down|min|max>, Set the current "
-			"frequency for the cores specified in <core_mask> by scaling "
-			"each up/down/min/max.",
+	.help_str = "set_cpu_freq <core_mask> <up|down|min|max|enable_turbo|disable_turbo>, adjust the current "
+			"frequency for the cores specified in <core_mask>",
 	.tokens = {
 		(void *)&cmd_set_cpu_freq_mask,
 		(void *)&cmd_set_cpu_freq_mask_core_mask,
@@ -614,6 +588,10 @@ cmd_set_cpu_freq_parsed(void *parsed_result, struct cmdline *cl,
 		ret = power_manager_scale_core_min(res->core_num);
 	else if (!strcmp(res->cmd , "max"))
 		ret = power_manager_scale_core_max(res->core_num);
+	else if (!strcmp(res->cmd, "enable_turbo"))
+		ret = power_manager_enable_turbo_core(res->core_num);
+	else if (!strcmp(res->cmd, "disable_turbo"))
+		ret = power_manager_disable_turbo_core(res->core_num);
 	if (ret < 0) {
 		cmdline_printf(cl, "Error scaling core(%u) '%s'\n", res->core_num,
 				res->cmd);
@@ -628,13 +606,13 @@ cmdline_parse_token_num_t cmd_set_cpu_freq_core_num =
 			core_num, UINT8);
 cmdline_parse_token_string_t cmd_set_cpu_freq_cmd_cmd =
 	TOKEN_STRING_INITIALIZER(struct cmd_set_cpu_freq_result,
-			cmd, "up#down#min#max");
+			cmd, "up#down#min#max#enable_turbo#disable_turbo");
 
 cmdline_parse_inst_t cmd_set_cpu_freq_set = {
 	.f = cmd_set_cpu_freq_parsed,
 	.data = NULL,
-	.help_str = "set_cpu_freq <core_num> <up|down|min|max>, Set the current "
-			"frequency for the specified core by scaling up/down/min/max",
+	.help_str = "set_cpu_freq <core_num> <up|down|min|max|enable_turbo|disable_turbo>, adjust the current "
+			"frequency for the specified core",
 	.tokens = {
 		(void *)&cmd_set_cpu_freq,
 		(void *)&cmd_set_cpu_freq_core_num,

@@ -1,33 +1,5 @@
-..  BSD LICENSE
-    Copyright(c) 2015 Intel Corporation. All rights reserved.
-    All rights reserved.
-
-    Redistribution and use in source and binary forms, with or without
-    modification, are permitted provided that the following conditions
-    are met:
-
-    * Redistributions of source code must retain the above copyright
-    notice, this list of conditions and the following disclaimer.
-    * Redistributions in binary form must reproduce the above copyright
-    notice, this list of conditions and the following disclaimer in
-    the documentation and/or other materials provided with the
-    distribution.
-    * Neither the name of Intel Corporation nor the names of its
-    contributors may be used to endorse or promote products derived
-    from this software without specific prior written permission.
-
-    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-    "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-    A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-    OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-    SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-    LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-    DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-    THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-    OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
+..  SPDX-License-Identifier: BSD-3-Clause
+    Copyright(c) 2015 Intel Corporation.
 
 PTP Client Sample Application
 =============================
@@ -78,39 +50,20 @@ The adjustment for slave can be represented as:
 If the command line parameter ``-T 1`` is used the application also
 synchronizes the PTP PHC clock with the Linux kernel clock.
 
-
 Compiling the Application
 -------------------------
 
-To compile the application, export the path to the DPDK source tree and edit
-the ``config/common_linuxapp`` configuration file to enable IEEE1588:
+To compile the sample application see :doc:`compiling`.
 
-.. code-block:: console
+The application is located in the ``ptpclient`` sub-directory.
 
-    export RTE_SDK=/path/to/rte_sdk
+.. note::
+   To compile the application edit the ``config/common_linuxapp`` configuration file to enable IEEE1588
+   and then recompile DPDK:
 
-    # Edit  common_linuxapp and set the following options:
-    CONFIG_RTE_LIBRTE_IEEE1588=y
+   .. code-block:: console
 
-Set the target, for example:
-
-.. code-block:: console
-
-    export RTE_TARGET=x86_64-native-linuxapp-gcc
-
-See the *DPDK Getting Started* Guide for possible ``RTE_TARGET`` values.
-
-Build the application as follows:
-
-.. code-block:: console
-
-    # Recompile DPDK.
-    make install T=$RTE_TARGET
-
-    # Compile the application.
-    cd ${RTE_SDK}/examples/ptpclient
-    make
-
+      CONFIG_RTE_LIBRTE_IEEE1588=y
 
 Running the Application
 -----------------------
@@ -119,7 +72,7 @@ To run the example in a ``linuxapp`` environment:
 
 .. code-block:: console
 
-    ./build/ptpclient -c 2 -n 4 -- -p 0x1 -T 0
+    ./build/ptpclient -l 1 -n 4 -- -p 0x1 -T 0
 
 Refer to *DPDK Getting Started Guide* for general information on running
 applications and the Environment Abstraction Layer (EAL) options.
@@ -171,15 +124,8 @@ used by the application:
 
 .. code-block:: c
 
-    mbuf_pool = rte_mempool_create("MBUF_POOL",
-                                   NUM_MBUFS * nb_ports,
-                                   MBUF_SIZE,
-                                   MBUF_CACHE_SIZE,
-                                   sizeof(struct rte_pktmbuf_pool_private),
-                                   rte_pktmbuf_pool_init, NULL,
-                                   rte_pktmbuf_init,      NULL,
-                                   rte_socket_id(),
-                                   0);
+    mbuf_pool = rte_pktmbuf_pool_create("MBUF_POOL", NUM_MBUFS * nb_ports,
+           MBUF_CACHE_SIZE, 0, RTE_MBUF_DEFAULT_BUF_SIZE, rte_socket_id());
 
 Mbufs are the packet buffer structure used by DPDK. They are explained in
 detail in the "Mbuf Library" section of the *DPDK Programmer's Guide*.
@@ -264,7 +210,7 @@ PTP IEEE1588 L2 functionality.
 .. code-block:: c
 
     void
-    parse_ptp_frames(uint8_t portid, struct rte_mbuf *m) {
+    parse_ptp_frames(uint16_t portid, struct rte_mbuf *m) {
         struct ptp_header *ptp_hdr;
         struct ether_hdr *eth_hdr;
         uint16_t eth_type;

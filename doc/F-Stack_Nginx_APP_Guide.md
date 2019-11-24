@@ -4,140 +4,90 @@ F-Stack is an open source network framework based on DPDK. F-Stack supports stan
 
 ## How does Nginx use F-Stack?
 
-  Nginx APP is in `app/nginx-1.11.10` directory.
+  Nginx APP is in `app/nginx-1.16.1` directory.
 
-### New nginx module `ngx_ff_module.c`
+```
 
-Hook operation of Network IO interface , the transformation of the ff socket, in order to distinguish from regular file descriptor.
+                                                        +--------+
+                         +------------------------+     |
+                            channel: socketpair         |
+                         +------------------------+     |  signal(reload, quit..)
+                                                        |
+                                                        |
+                                              +---------v--------+
+                                              |                  |
+                             +----------------+  master process  +---------------+
+                             |                |                  |               |
+                             |  channel       +----------+-------+               |
+                             |                           |              channel  |
+                             |                  channel  |                       |
+                             |                           |                       |
+                   +---------+----------+     +----------+--------+    +---------+--------+
+first one to start |                    |     |                   |    |                  |
+ last one to exit<-+   primary worker   |     |  secondary worker |    | secondary worker |
+                   |                    |     |                   |    |                  |
+                   +--------------------+     +-------------------+    +------------------+
+                   +--------------------+     +-------------------+  
+                   |                    |     |                   |
+                   |   fstack,kernel    |     |   fstack,kernel   |
+                   |     and channel    |     |     and channel   |
+                   |     loop thread    |     |     loop thread   |
+                   |                    |     |			  |
+                   +--------------------+     +-------------------+
+                    woker process cycle        woker process cycle
 
-First, define network interface functions.
+```
 
-    static int (*real_close)(int);
-    static int (*real_socket)(int, int, int);
-    static int (*real_bind)(int, const struct sockaddr*, socklen_t);
-    static int (*real_connect)(int, const struct sockaddr*, socklen_t);
-    static int (*real_listen)(int, int);
-    static int (*real_setsockopt)(int, int, int, const void *, socklen_t);
-    
-    static int (*real_accept)(int, struct sockaddr *, socklen_t *);
-    static int (*real_accept4)(int, struct sockaddr *, socklen_t *, int);
-    static ssize_t (*real_recv)(int, void *, size_t, int);
-    static ssize_t (*real_send)(int, const void *, size_t, int);
-    
-    static ssize_t (*real_writev)(int, const struct iovec *, int);
-    static ssize_t (*real_write)(int, const void *, size_t );
-    static ssize_t (*real_read)(int, void *, size_t );
-    static ssize_t (*real_readv)(int, const struct iovec *, int);
-    
-    static int (*real_ioctl)(int, int, void *);
-    
-    static int (*real_select) (int, fd_set *, fd_set *, fd_set *, struct timeval *);
+- spawn primary worker firstly, and then wait for primary startup, continue to spawn secondary workers.
 
-Initialize the F-Stack module, hook network interface functions, using our interface to replace the System Interface. Initialize F-Stack.
+- a major addition to the worker process is fstack-handling：ff_init();ff_run(worker_process_cycle); worker_process_cycle(handle channel/host/fstack event).
 
-      void ff_mod_init(int argc, char * const *argv) {
-        int rc;
-    
-        #define INIT_FUNCTION(func) \
-            real_##func = dlsym(RTLD_NEXT, #func); \
-            assert(real_##func)
-    
-        INIT_FUNCTION(socket);
-        INIT_FUNCTION(bind);
-        INIT_FUNCTION(connect);
-        INIT_FUNCTION(close);
-        INIT_FUNCTION(listen);    
-        INIT_FUNCTION(setsockopt);
-        INIT_FUNCTION(accept);
-        INIT_FUNCTION(accept4);
-        INIT_FUNCTION(recv);
-        INIT_FUNCTION(send);
-        INIT_FUNCTION(writev);
-        INIT_FUNCTION(write);
-        INIT_FUNCTION(read);
-        INIT_FUNCTION(readv);
-    
-        INIT_FUNCTION(ioctl);
-        INIT_FUNCTION(select);
-    
-    #undef INIT_FUNCTION
-    
-        assert(argc >= 2);
-    
-        rc = ff_init(argv[1], argc, argv);
-        assert(0 == rc);
-    
-        inited = 1;
+## What's Different?
+### New directives:
+All the directives below are available only when ```NGX_HAVE_FSTACK``` is defined.
+```
+    Syntax: kernel_network_stack on | off;
+    Default: kernel_network_stack off;
+    Context: http, server
+
+    Determines whether server should run on kernel network stack or fstack.
+```
+
+```
+    Syntax: proxy_kernel_network_stack on | off;
+    Default: kernel_network_stack off;
+    Context: http, stream, mail, server
+
+    Determines whether proxy should go through kernel network stack or fstack.
+```
+
+```
+    Syntax: schedule_timeout time;
+    Default: schedule_timeout 30ms;
+    Context: main
+
+    Sets a time interval for polling kernel_network_stack. The default value is 30 msec.
+```
+
+### Command-line `reload`
+the `reload` is not graceful, service will still be unavailable during the process of reloading.
+
+### Necessary modifies in nginx.conf:
+```
+    user  root; # root account is necessary.
+    fstack_conf f-stack.conf;  # path of f-stack configuration file, default: $NGX_PREFIX/conf/f-stack.conf.
+    worker_processes  1; # should be equal to the lcore count of `dpdk.lcore_mask` in f-stack.conf.
+
+    events {
+        worker_connections  102400; # increase
+        use kqueue; # use kqueue
     }
 
-Re-implement the network interface with FF API to replace the System network interface. Take socket () as an example, use ff\_socket instead of real\_socket, and return the F-Stack file descriptor. Other APIs refers to module code.
+    sendfile off; # sendfile off
+```
 
-    int socket(int domain, int type, int protocol)
-    {
-        int rc;
-       
-        if ((inited == 0) ||  (AF_INET != domain) || (SOCK_STREAM != type && SOCK_DGRAM != type))
-        {
-            rc = real_socket(domain, type, protocol);
-            return rc;
-        }
-    
-        rc = ff_socket(domain, type, protocol);
-        if(rc >= 0)
-            rc |= 1 << FST_FD_BITS;
-    
-        return rc;
-    }
-
-### Other modifications
-
- `auto/sources`
-
-Add compiling file
-
- `auto/make`
-
-Add link lib
-
- `auto/options`
-
-Add module
-
-`ngx_kqueue_module.c`
-
-kqueue module adapted to F-Stack ff API
-
-## Start Nginx compiling
-
-Configuration needs to include F-Stack `ff_module`
-
+## Nginx compiling
 	./configure --prefix=/usr/local/nginx_fstack --with-ff_module
 	make
 	make install
 
-Notes for Nginx based F-Stack configuration file.
-
-	worker_processes  1; # always be 1
-
-	events {
-		worker_connections  102400; # to 102400
-		use kqueue; # use kqueue
-	}
-	
-	sendfile off; # sendfile off
-
-Start Nginx with `start.sh`
-
-    ./start.sh -b /usr/local/nginx_fstack/sbin/nginx -c config.ini
-
- or with the method below. Description of arguments is as bellow,
-
-	#	-c coremask, The primary and secondary processes need to specify the coremask of the individual lcore they want to use, for example, primary process -c 1, secondary -c 2, -c 4, -c 8, -c 10, etc.
-	#	--proc-type = primary/secondary primary/secondary
-	#	--num-procs = number of process
-	#	--proc-id = current process ID, increase from 0
-	
-	<nginx_dir>/nginx config.ini -c <cmask>  --proc-type=primary --num-procs=<num_procs> --proc-id=<proc_id> # primary process
-	<nginx_dir>/nginx config.ini -c <cmask>  --proc-type=secondary --num-procs=<num_procs> --proc-id=<proc_id> # seconary process, if needed
-
- Other is identical to the standard Nginx.

@@ -1,32 +1,5 @@
-..  BSD LICENSE
-    Copyright(c) 2010-2014 Intel Corporation. All rights reserved.
-    All rights reserved.
-
-    Redistribution and use in source and binary forms, with or without
-    modification, are permitted provided that the following conditions
-    are met:
-
-    * Redistributions of source code must retain the above copyright
-    notice, this list of conditions and the following disclaimer.
-    * Redistributions in binary form must reproduce the above copyright
-    notice, this list of conditions and the following disclaimer in
-    the documentation and/or other materials provided with the
-    distribution.
-    * Neither the name of Intel Corporation nor the names of its
-    contributors may be used to endorse or promote products derived
-    from this software without specific prior written permission.
-
-    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-    "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-    A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-    OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-    SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-    LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-    DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-    THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-    OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+..  SPDX-License-Identifier: BSD-3-Clause
+    Copyright(c) 2010-2014 Intel Corporation.
 
 .. _Development_Kit_Build_System:
 
@@ -53,62 +26,7 @@ Build Directory Concept
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 After installation, a build directory structure is created.
-Each build directory contains include files, libraries, and applications:
-
-.. code-block:: console
-
-    ~/DPDK$ ls
-    app                               MAINTAINERS
-    config                            Makefile
-    COPYRIGHT                         mk
-    doc                               scripts
-    examples                          lib
-    tools                             x86_64-native-linuxapp-gcc
-    x86_64-native-linuxapp-icc        i686-native-linuxapp-gcc
-    i686-native-linuxapp-icc
-
-    ...
-    ~/DEV/DPDK$ ls i686-native-linuxapp-gcc
-
-    app build buildtools include kmod lib Makefile
-
-
-    ~/DEV/DPDK$ ls i686-native-linuxapp-gcc/app/
-    cmdline_test   dump_cfg     test     testpmd
-    cmdline_test.map      dump_cfg.map   test.map
-	    testpmd.map
-
-
-    ~/DEV/DPDK$ ls i686-native-linuxapp-gcc/lib/
-
-    libethdev.a  librte_hash.a  librte_mbuf.a librte_pmd_ixgbe.a
-
-    librte_cmdline.a librte_lpm.a librte_mempool.a librte_ring.a
-
-    librte_eal.a librte_pmd_e1000.a librte_timer.a
-
-
-    ~/DEV/DPDK$ ls i686-native-linuxapp-gcc/include/
-    arch                       rte_cpuflags.h       rte_memcpy.h
-    cmdline_cirbuf.h           rte_cycles.h         rte_memory.h
-    cmdline.h                  rte_debug.h          rte_mempool.h
-    cmdline_parse_etheraddr.h  rte_eal.h            rte_memzone.h
-    cmdline_parse.h            rte_errno.h          rte_pci_dev_ids.h
-    cmdline_parse_ipaddr.h     rte_ethdev.h         rte_pci.h
-    cmdline_parse_num.h        rte_ether.h          rte_per_lcore.h
-    cmdline_parse_portlist.h   rte_fbk_hash.h       rte_prefetch.h
-    cmdline_parse_string.h     rte_hash_crc.h       rte_random.h
-    cmdline_rdline.h           rte_hash.h           rte_ring.h
-    cmdline_socket.h           rte_interrupts.h     rte_rwlock.h
-    cmdline_vt100.h            rte_ip.h             rte_sctp.h
-    exec-env                   rte_jhash.h          rte_spinlock.h
-    rte_alarm.h                rte_launch.h         rte_string_fns.h
-    rte_atomic.h               rte_lcore.h          rte_tailq.h
-    rte_branch_prediction.h    rte_log.h            rte_tcp.h
-    rte_byteorder.h            rte_lpm.h            rte_timer.h
-    rte_common.h               rte_malloc.h         rte_udp.h
-    rte_config.h               rte_mbuf.h
-
+Each build directory contains include files, libraries, and applications.
 
 A build directory is specific to a configuration that includes architecture + execution environment + toolchain.
 It is possible to have several build directories sharing the same sources with different configurations.
@@ -298,8 +216,6 @@ Objects
 Misc
 ^^^^
 
-*   rte.doc.mk: Documentation in the development kit framework
-
 *   rte.gnuconfigure.mk: Build an application that is configure-based.
 
 *   rte.subdir.mk: Build several directories in the development kit framework.
@@ -319,7 +235,7 @@ instance the macro:
 
 .. code-block:: c
 
-   PMD_REGISTER_DRIVER(drv, name)
+   RTE_PMD_REGISTER_PCI(name, drv)
 
 Creates the following symbol:
 
@@ -331,7 +247,7 @@ Creates the following symbol:
 Which ``dpdk-pmdinfogen`` scans for.  Using this information other relevant
 bits of data can be exported from the object file and used to produce a
 hardware support description, that ``dpdk-pmdinfogen`` then encodes into a
-json formatted string in the following format:
+JSON formatted string in the following format:
 
 .. code-block:: c
 
@@ -422,7 +338,7 @@ Variables that Can be Set/Overridden in a Makefile Only
 
 *   POSTCLEAN: A list of actions to be taken after cleaning. The user should use += to append data in this variable.
 
-*   DEPDIR-y: Only used in the development kit framework to specify if the build of the current directory depends on build of another one.
+*   DEPDIRS-$(DIR): Only used in the development kit framework to specify if the build of the current directory depends on build of another one.
     This is needed to support parallel builds correctly.
 
 Variables that can be Set/Overridden by the User on the Command Line Only

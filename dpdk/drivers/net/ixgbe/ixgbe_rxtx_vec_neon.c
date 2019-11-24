@@ -1,38 +1,9 @@
-/*-
- *   BSD LICENSE
- *
- *   Copyright(c) 2010-2015 Intel Corporation. All rights reserved.
- *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright(c) 2010-2015 Intel Corporation
  */
 
 #include <stdint.h>
-#include <rte_ethdev.h>
+#include <rte_ethdev_driver.h>
 #include <rte_malloc.h>
 
 #include "ixgbe_ethdev.h"
@@ -85,18 +56,15 @@ ixgbe_rxq_rearm(struct ixgbe_rx_queue *rxq)
 		/*
 		 * Flush mbuf with pkt template.
 		 * Data to be rearmed is 6 bytes long.
-		 * Though, RX will overwrite ol_flags that are coming next
-		 * anyway. So overwrite whole 8 bytes with one load:
-		 * 6 bytes of rearm_data plus first 2 bytes of ol_flags.
 		 */
 		vst1_u8((uint8_t *)&mb0->rearm_data, p);
-		paddr = mb0->buf_physaddr + RTE_PKTMBUF_HEADROOM;
+		paddr = mb0->buf_iova + RTE_PKTMBUF_HEADROOM;
 		dma_addr0 = vsetq_lane_u64(paddr, zero, 0);
 		/* flush desc with pa dma_addr */
 		vst1q_u64((uint64_t *)&rxdp++->read, dma_addr0);
 
 		vst1_u8((uint8_t *)&mb1->rearm_data, p);
-		paddr = mb1->buf_physaddr + RTE_PKTMBUF_HEADROOM;
+		paddr = mb1->buf_iova + RTE_PKTMBUF_HEADROOM;
 		dma_addr1 = vsetq_lane_u64(paddr, zero, 0);
 		vst1q_u64((uint64_t *)&rxdp++->read, dma_addr1);
 	}
@@ -114,14 +82,6 @@ ixgbe_rxq_rearm(struct ixgbe_rx_queue *rxq)
 	IXGBE_PCI_REG_WRITE(rxq->rdt_reg_addr, rx_id);
 }
 
-/* Handling the offload flags (olflags) field takes computation
- * time when receiving packets. Therefore we provide a flag to disable
- * the processing of the olflags field when they are not needed. This
- * gives improved performance, at the cost of losing the offload info
- * in the received packet
- */
-#ifdef RTE_IXGBE_RX_OLFLAGS_ENABLE
-
 #define VTAG_SHIFT     (3)
 
 static inline void
@@ -137,8 +97,8 @@ desc_to_olflags_v(uint8x16x2_t sterr_tmp1, uint8x16x2_t sterr_tmp2,
 	} vol;
 
 	const uint8x16_t pkttype_msk = {
-			PKT_RX_VLAN_PKT, PKT_RX_VLAN_PKT,
-			PKT_RX_VLAN_PKT, PKT_RX_VLAN_PKT,
+			PKT_RX_VLAN, PKT_RX_VLAN,
+			PKT_RX_VLAN, PKT_RX_VLAN,
 			0x00, 0x00, 0x00, 0x00,
 			0x00, 0x00, 0x00, 0x00,
 			0x00, 0x00, 0x00, 0x00};
@@ -170,9 +130,6 @@ desc_to_olflags_v(uint8x16x2_t sterr_tmp1, uint8x16x2_t sterr_tmp2,
 	rx_pkts[2]->ol_flags = vol.e[2];
 	rx_pkts[3]->ol_flags = vol.e[3];
 }
-#else
-#define desc_to_olflags_v(sterr_tmp1, sterr_tmp2, staterr, rx_pkts)
-#endif
 
 /*
  * vPMD raw receive routine, only accept(nb_pkts >= RTE_IXGBE_DESCS_PER_LOOP)
@@ -196,7 +153,6 @@ _recv_raw_pkts_vec(struct ixgbe_rx_queue *rxq, struct rte_mbuf **rx_pkts,
 	struct ixgbe_rx_entry *sw_ring;
 	uint16_t nb_pkts_recd;
 	int pos;
-	uint64_t var;
 	uint8x16_t shuf_msk = {
 		0xFF, 0xFF,
 		0xFF, 0xFF,  /* skip 32 bits pkt_type */
@@ -255,15 +211,11 @@ _recv_raw_pkts_vec(struct ixgbe_rx_queue *rxq, struct rte_mbuf **rx_pkts,
 		uint64x2_t mbp1, mbp2;
 		uint8x16_t staterr;
 		uint16x8_t tmp;
+		uint32_t var = 0;
 		uint32_t stat;
 
 		/* B.1 load 1 mbuf point */
 		mbp1 = vld1q_u64((uint64_t *)&sw_ring[pos]);
-
-		/* Read desc statuses backwards to avoid race condition */
-		/* A.1 load 4 pkts desc */
-		descs[3] =  vld1q_u64((uint64_t *)(rxdp + 3));
-		rte_rmb();
 
 		/* B.2 copy 2 mbuf point into rx_pkts  */
 		vst1q_u64((uint64_t *)&rx_pkts[pos], mbp1);
@@ -271,10 +223,12 @@ _recv_raw_pkts_vec(struct ixgbe_rx_queue *rxq, struct rte_mbuf **rx_pkts,
 		/* B.1 load 1 mbuf point */
 		mbp2 = vld1q_u64((uint64_t *)&sw_ring[pos + 2]);
 
-		descs[2] =  vld1q_u64((uint64_t *)(rxdp + 2));
-		/* B.1 load 2 mbuf point */
-		descs[1] =  vld1q_u64((uint64_t *)(rxdp + 1));
+		/* A. load 4 pkts descs */
 		descs[0] =  vld1q_u64((uint64_t *)(rxdp));
+		descs[1] =  vld1q_u64((uint64_t *)(rxdp + 1));
+		descs[2] =  vld1q_u64((uint64_t *)(rxdp + 2));
+		descs[3] =  vld1q_u64((uint64_t *)(rxdp + 3));
+		rte_smp_rmb();
 
 		/* B.2 copy 2 mbuf point into rx_pkts  */
 		vst1q_u64((uint64_t *)&rx_pkts[pos + 2], mbp2);
@@ -333,12 +287,6 @@ _recv_raw_pkts_vec(struct ixgbe_rx_queue *rxq, struct rte_mbuf **rx_pkts,
 			*(int *)split_packet = ~stat & IXGBE_VPMD_DESC_EOP_MASK;
 
 			split_packet += RTE_IXGBE_DESCS_PER_LOOP;
-
-			/* zero-out next pointers */
-			rx_pkts[pos]->next = NULL;
-			rx_pkts[pos + 1]->next = NULL;
-			rx_pkts[pos + 2]->next = NULL;
-			rx_pkts[pos + 3]->next = NULL;
 		}
 
 		rte_prefetch_non_temporal(rxdp + RTE_IXGBE_DESCS_PER_LOOP);
@@ -349,11 +297,19 @@ _recv_raw_pkts_vec(struct ixgbe_rx_queue *rxq, struct rte_mbuf **rx_pkts,
 		vst1q_u8((uint8_t *)&rx_pkts[pos]->rx_descriptor_fields1,
 			 pkt_mb1);
 
+		stat &= IXGBE_VPMD_DESC_DD_MASK;
+
 		/* C.4 calc avaialbe number of desc */
-		var =  __builtin_popcount(stat & IXGBE_VPMD_DESC_DD_MASK);
-		nb_pkts_recd += var;
-		if (likely(var != RTE_IXGBE_DESCS_PER_LOOP))
+		if (likely(stat != IXGBE_VPMD_DESC_DD_MASK)) {
+			while (stat & 0x01) {
+				++var;
+				stat = stat >> 8;
+			}
+			nb_pkts_recd += var;
 			break;
+		} else {
+			nb_pkts_recd += RTE_IXGBE_DESCS_PER_LOOP;
+		}
 	}
 
 	/* Update our internal tail pointer */
@@ -429,7 +385,7 @@ vtx1(volatile union ixgbe_adv_tx_desc *txdp,
 		struct rte_mbuf *pkt, uint64_t flags)
 {
 	uint64x2_t descriptor = {
-			pkt->buf_physaddr + pkt->data_off,
+			pkt->buf_iova + pkt->data_off,
 			(uint64_t)pkt->pkt_len << 46 | flags | pkt->data_len};
 
 	vst1q_u64((uint64_t *)&txdp->read, descriptor);
@@ -446,8 +402,8 @@ vtx(volatile union ixgbe_adv_tx_desc *txdp,
 }
 
 uint16_t
-ixgbe_xmit_pkts_vec(void *tx_queue, struct rte_mbuf **tx_pkts,
-		       uint16_t nb_pkts)
+ixgbe_xmit_fixed_burst_vec(void *tx_queue, struct rte_mbuf **tx_pkts,
+			   uint16_t nb_pkts)
 {
 	struct ixgbe_tx_queue *txq = (struct ixgbe_tx_queue *)tx_queue;
 	volatile union ixgbe_adv_tx_desc *txdp;
@@ -556,5 +512,11 @@ ixgbe_txq_vec_setup(struct ixgbe_tx_queue *txq)
 int __attribute__((cold))
 ixgbe_rx_vec_dev_conf_condition_check(struct rte_eth_dev *dev)
 {
+	struct rte_eth_rxmode *rxmode = &dev->data->dev_conf.rxmode;
+
+	/* no csum error report support */
+	if (rxmode->offloads & DEV_RX_OFFLOAD_CHECKSUM)
+		return -1;
+
 	return ixgbe_rx_vec_dev_conf_condition_check_default(dev);
 }

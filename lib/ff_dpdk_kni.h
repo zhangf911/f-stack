@@ -31,24 +31,29 @@
 #include <rte_mbuf.h>
 #include <rte_mempool.h>
 
+extern int enable_kni;
+
 enum FilterReturn {
     FILTER_UNKNOWN = -1,
     FILTER_ARP = 1,
     FILTER_KNI = 2,
+#ifdef INET6
+    FILTER_NDP = 3,  // Neighbor Solicitation/Advertisement, Router Solicitation/Advertisement/Redirect
+#endif
 };
 
 void ff_kni_init(uint16_t nb_ports, const char *tcp_ports,
     const char *udp_ports);
 
-void ff_kni_alloc(uint8_t port_id, unsigned socket_id,
-    struct rte_mempool *mbuf_pool);
+void ff_kni_alloc(uint16_t port_id, unsigned socket_id,
+    struct rte_mempool *mbuf_pool, unsigned ring_queue_size);
 
-void ff_kni_process(uint8_t port_id, uint16_t queue_id,
+void ff_kni_process(uint16_t port_id, uint16_t queue_id,
     struct rte_mbuf **pkts_burst, unsigned count);
 
-enum FilterReturn ff_kni_proto_filter(const void *data, uint16_t len);
+enum FilterReturn ff_kni_proto_filter(const void *data, uint16_t len, uint16_t eth_frame_type);
 
-int ff_kni_enqueue(uint8_t port_id, struct rte_mbuf *pkt);
+int ff_kni_enqueue(uint16_t port_id, struct rte_mbuf *pkt);
 
 
 #endif /* ifndef _FSTACK_DPDK_KNI_H */

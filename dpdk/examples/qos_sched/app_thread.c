@@ -1,34 +1,5 @@
-/*-
- *   BSD LICENSE
- *
- *   Copyright(c) 2010-2014 Intel Corporation. All rights reserved.
- *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright(c) 2010-2014 Intel Corporation
  */
 
 #include <stdint.h>
@@ -107,7 +78,7 @@ app_rx_thread(struct thread_conf **confs)
 			}
 
 			if (unlikely(rte_ring_sp_enqueue_bulk(conf->rx_ring,
-								(void **)rx_mbufs, nb_rx) != 0)) {
+					(void **)rx_mbufs, nb_rx, NULL) == 0)) {
 				for(i = 0; i < nb_rx; i++) {
 					rte_pktmbuf_free(rx_mbufs[i]);
 
@@ -179,8 +150,8 @@ app_tx_thread(struct thread_conf **confs)
 
 	while ((conf = confs[conf_idx])) {
 		retval = rte_ring_sc_dequeue_bulk(conf->tx_ring, (void **)mbufs,
-					burst_conf.qos_dequeue);
-		if (likely(retval == 0)) {
+					burst_conf.qos_dequeue, NULL);
+		if (likely(retval != 0)) {
 			app_send_packets(conf, mbufs, burst_conf.qos_dequeue);
 
 			conf->counter = 0; /* reset empty read loop counter */
@@ -218,7 +189,7 @@ app_worker_thread(struct thread_conf **confs)
 
 		/* Read packet from the ring */
 		nb_pkt = rte_ring_sc_dequeue_burst(conf->rx_ring, (void **)mbufs,
-					burst_conf.ring_burst);
+					burst_conf.ring_burst, NULL);
 		if (likely(nb_pkt)) {
 			int nb_sent = rte_sched_port_enqueue(conf->sched_port, mbufs,
 					nb_pkt);
@@ -230,7 +201,9 @@ app_worker_thread(struct thread_conf **confs)
 		nb_pkt = rte_sched_port_dequeue(conf->sched_port, mbufs,
 					burst_conf.qos_dequeue);
 		if (likely(nb_pkt > 0))
-			while (rte_ring_sp_enqueue_bulk(conf->tx_ring, (void **)mbufs, nb_pkt) != 0);
+			while (rte_ring_sp_enqueue_bulk(conf->tx_ring,
+					(void **)mbufs, nb_pkt, NULL) == 0)
+				; /* empty body */
 
 		conf_idx++;
 		if (confs[conf_idx] == NULL)
@@ -252,7 +225,7 @@ app_mixed_thread(struct thread_conf **confs)
 
 		/* Read packet from the ring */
 		nb_pkt = rte_ring_sc_dequeue_burst(conf->rx_ring, (void **)mbufs,
-					burst_conf.ring_burst);
+					burst_conf.ring_burst, NULL);
 		if (likely(nb_pkt)) {
 			int nb_sent = rte_sched_port_enqueue(conf->sched_port, mbufs,
 					nb_pkt);

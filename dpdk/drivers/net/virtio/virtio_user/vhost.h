@@ -1,38 +1,9 @@
-/*-
- *   BSD LICENSE
- *
- *   Copyright(c) 2010-2016 Intel Corporation. All rights reserved.
- *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright(c) 2010-2016 Intel Corporation
  */
 
-#ifndef _VHOST_NET_USER_H
-#define _VHOST_NET_USER_H
+#ifndef _VIRTIO_USER_VHOST_H
+#define _VIRTIO_USER_VHOST_H
 
 #include <stdint.h>
 #include <linux/types.h>
@@ -41,8 +12,6 @@
 #include "../virtio_pci.h"
 #include "../virtio_logs.h"
 #include "../virtqueue.h"
-
-#define VHOST_MEMORY_MAX_NREGIONS 8
 
 struct vhost_vring_state {
 	unsigned int index;
@@ -98,6 +67,8 @@ enum vhost_user_request {
 	VHOST_USER_MAX
 };
 
+extern const char * const vhost_msg_strings[VHOST_USER_MAX];
+
 struct vhost_memory_region {
 	uint64_t guest_phys_addr;
 	uint64_t memory_size; /* bytes */
@@ -105,42 +76,19 @@ struct vhost_memory_region {
 	uint64_t mmap_offset;
 };
 
-struct vhost_memory {
-	uint32_t nregions;
-	uint32_t padding;
-	struct vhost_memory_region regions[VHOST_MEMORY_MAX_NREGIONS];
+struct virtio_user_dev;
+
+struct virtio_user_backend_ops {
+	int (*setup)(struct virtio_user_dev *dev);
+	int (*send_request)(struct virtio_user_dev *dev,
+			    enum vhost_user_request req,
+			    void *arg);
+	int (*enable_qp)(struct virtio_user_dev *dev,
+			 uint16_t pair_idx,
+			 int enable);
 };
 
-struct vhost_user_msg {
-	enum vhost_user_request request;
-
-#define VHOST_USER_VERSION_MASK     0x3
-#define VHOST_USER_REPLY_MASK       (0x1 << 2)
-	uint32_t flags;
-	uint32_t size; /* the following payload size */
-	union {
-#define VHOST_USER_VRING_IDX_MASK   0xff
-#define VHOST_USER_VRING_NOFD_MASK  (0x1 << 8)
-		uint64_t u64;
-		struct vhost_vring_state state;
-		struct vhost_vring_addr addr;
-		struct vhost_memory memory;
-	} payload;
-	int fds[VHOST_MEMORY_MAX_NREGIONS];
-} __attribute((packed));
-
-#define VHOST_USER_HDR_SIZE offsetof(struct vhost_user_msg, payload.u64)
-#define VHOST_USER_PAYLOAD_SIZE \
-	(sizeof(struct vhost_user_msg) - VHOST_USER_HDR_SIZE)
-
-/* The version of the protocol we support */
-#define VHOST_USER_VERSION    0x1
-
-#define VHOST_USER_F_PROTOCOL_FEATURES 30
-#define VHOST_USER_MQ (1ULL << VHOST_USER_F_PROTOCOL_FEATURES)
-
-int vhost_user_sock(int vhostfd, enum vhost_user_request req, void *arg);
-int vhost_user_setup(const char *path);
-int vhost_user_enable_queue_pair(int vhostfd, uint16_t pair_idx, int enable);
+extern struct virtio_user_backend_ops virtio_ops_user;
+extern struct virtio_user_backend_ops virtio_ops_kernel;
 
 #endif

@@ -1,39 +1,10 @@
-/*-
- *   BSD LICENSE
- *
- *   Copyright(c) 2013-2015 Intel Corporation. All rights reserved.
- *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright(c) 2013-2015 Intel Corporation
  */
 
 #include <inttypes.h>
 
-#include <rte_ethdev.h>
+#include <rte_ethdev_driver.h>
 #include <rte_common.h>
 #include "fm10k.h"
 #include "base/fm10k_type.h"
@@ -67,6 +38,8 @@ fm10k_reset_tx_queue(struct fm10k_tx_queue *txq);
 #define RXEFLAG_SHIFT     (13)
 /* IPE/L4E flag shift */
 #define L3L4EFLAG_SHIFT     (14)
+/* shift PKT_RX_L4_CKSUM_GOOD into one byte by 1 bit */
+#define CKSUM_SHIFT     (1)
 
 static inline void
 fm10k_desc_to_olflags_v(__m128i descs[4], struct rte_mbuf **rx_pkts)
@@ -79,8 +52,10 @@ fm10k_desc_to_olflags_v(__m128i descs[4], struct rte_mbuf **rx_pkts)
 
 	const __m128i pkttype_msk = _mm_set_epi16(
 			0x0000, 0x0000, 0x0000, 0x0000,
-			PKT_RX_VLAN_PKT, PKT_RX_VLAN_PKT,
-			PKT_RX_VLAN_PKT, PKT_RX_VLAN_PKT);
+			PKT_RX_VLAN | PKT_RX_VLAN_STRIPPED,
+			PKT_RX_VLAN | PKT_RX_VLAN_STRIPPED,
+			PKT_RX_VLAN | PKT_RX_VLAN_STRIPPED,
+			PKT_RX_VLAN | PKT_RX_VLAN_STRIPPED);
 
 	/* mask everything except rss type */
 	const __m128i rsstype_msk = _mm_set_epi16(
@@ -92,11 +67,18 @@ fm10k_desc_to_olflags_v(__m128i descs[4], struct rte_mbuf **rx_pkts)
 			0x0000, 0x0000, 0x0000, 0x0000,
 			0x0001, 0x0001, 0x0001, 0x0001);
 
+	/* mask the lower byte of ol_flags */
+	const __m128i ol_flags_msk = _mm_set_epi16(
+			0x0000, 0x0000, 0x0000, 0x0000,
+			0x00FF, 0x00FF, 0x00FF, 0x00FF);
+
 	const __m128i l3l4cksum_flag = _mm_set_epi8(0, 0, 0, 0,
 			0, 0, 0, 0,
 			0, 0, 0, 0,
-			PKT_RX_IP_CKSUM_BAD | PKT_RX_L4_CKSUM_BAD,
-			PKT_RX_IP_CKSUM_BAD, PKT_RX_L4_CKSUM_BAD, 0);
+			(PKT_RX_IP_CKSUM_BAD | PKT_RX_L4_CKSUM_BAD) >> CKSUM_SHIFT,
+			(PKT_RX_IP_CKSUM_BAD | PKT_RX_L4_CKSUM_GOOD) >> CKSUM_SHIFT,
+			(PKT_RX_IP_CKSUM_GOOD | PKT_RX_L4_CKSUM_BAD) >> CKSUM_SHIFT,
+			(PKT_RX_IP_CKSUM_GOOD | PKT_RX_L4_CKSUM_GOOD) >> CKSUM_SHIFT);
 
 	const __m128i rxe_flag = _mm_set_epi8(0, 0, 0, 0,
 			0, 0, 0, 0,
@@ -139,6 +121,10 @@ fm10k_desc_to_olflags_v(__m128i descs[4], struct rte_mbuf **rx_pkts)
 	/* Process L4/L3 checksum error flags */
 	cksumflag = _mm_srli_epi16(cksumflag, L3L4EFLAG_SHIFT);
 	cksumflag = _mm_shuffle_epi8(l3l4cksum_flag, cksumflag);
+
+	/* clean the higher byte and shift back the flag bits */
+	cksumflag = _mm_and_si128(cksumflag, ol_flags_msk);
+	cksumflag = _mm_slli_epi16(cksumflag, CKSUM_SHIFT);
 	vtag1 = _mm_or_si128(cksumflag, vtag1);
 
 	vol.dword = _mm_cvtsi128_si64(vtag1);
@@ -226,7 +212,7 @@ fm10k_rx_vec_condition_check(struct rte_eth_dev *dev)
 
 #ifndef RTE_FM10K_RX_OLFLAGS_ENABLE
 	/* whithout rx ol_flags, no VP flag report */
-	if (rxmode->hw_vlan_extend != 0)
+	if (rxmode->offloads & DEV_RX_OFFLOAD_VLAN_EXTEND)
 		return -1;
 #endif
 
@@ -234,11 +220,8 @@ fm10k_rx_vec_condition_check(struct rte_eth_dev *dev)
 	if (fconf->mode != RTE_FDIR_MODE_NONE)
 		return -1;
 
-	/* - no csum error report support
-	 * - no header split support
-	 */
-	if (rxmode->hw_ip_checksum == 1 ||
-	    rxmode->header_split == 1)
+	/* no header split support */
+	if (rxmode->offloads & DEV_RX_OFFLOAD_HEADER_SPLIT)
 		return -1;
 
 	return 0;
@@ -314,16 +297,15 @@ fm10k_rxq_rearm(struct fm10k_rx_queue *rxq)
 
 		/* Flush mbuf with pkt template.
 		 * Data to be rearmed is 6 bytes long.
-		 * Though, RX will overwrite ol_flags that are coming next
-		 * anyway. So overwrite whole 8 bytes with one load:
-		 * 6 bytes of rearm_data plus first 2 bytes of ol_flags.
 		 */
 		p0 = (uintptr_t)&mb0->rearm_data;
 		*(uint64_t *)p0 = rxq->mbuf_initializer;
 		p1 = (uintptr_t)&mb1->rearm_data;
 		*(uint64_t *)p1 = rxq->mbuf_initializer;
 
-		/* load buf_addr(lo 64bit) and buf_physaddr(hi 64bit) */
+		/* load buf_addr(lo 64bit) and buf_iova(hi 64bit) */
+		RTE_BUILD_BUG_ON(offsetof(struct rte_mbuf, buf_iova) !=
+				offsetof(struct rte_mbuf, buf_addr) + 8);
 		vaddr0 = _mm_loadu_si128((__m128i *)&mb0->buf_addr);
 		vaddr1 = _mm_loadu_si128((__m128i *)&mb1->buf_addr);
 
@@ -406,7 +388,7 @@ fm10k_recv_raw_pkts_vec(void *rx_queue, struct rte_mbuf **rx_pkts,
 	 */
 	rxdp = rxq->hw_ring + next_dd;
 
-	_mm_prefetch((const void *)rxdp, _MM_HINT_T0);
+	rte_prefetch0(rxdp);
 
 	/* See if we need to rearm the RX queue - gives the prefetch a bit
 	 * of time to act
@@ -441,6 +423,19 @@ fm10k_recv_raw_pkts_vec(void *rx_queue, struct rte_mbuf **rx_pkts,
 		0xFF, 0xFF,  /* skip high 16 bits pkt_type */
 		0xFF, 0xFF   /* Skip pkt_type field in shuffle operation */
 		);
+	/*
+	 * Compile-time verify the shuffle mask
+	 * NOTE: some field positions already verified above, but duplicated
+	 * here for completeness in case of future modifications.
+	 */
+	RTE_BUILD_BUG_ON(offsetof(struct rte_mbuf, pkt_len) !=
+			offsetof(struct rte_mbuf, rx_descriptor_fields1) + 4);
+	RTE_BUILD_BUG_ON(offsetof(struct rte_mbuf, data_len) !=
+			offsetof(struct rte_mbuf, rx_descriptor_fields1) + 8);
+	RTE_BUILD_BUG_ON(offsetof(struct rte_mbuf, vlan_tci) !=
+			offsetof(struct rte_mbuf, rx_descriptor_fields1) + 10);
+	RTE_BUILD_BUG_ON(offsetof(struct rte_mbuf, hash) !=
+			offsetof(struct rte_mbuf, rx_descriptor_fields1) + 12);
 
 	/* Cache is empty -> need to scan the buffer rings, but first move
 	 * the next 'n' mbufs into the cache
@@ -460,9 +455,13 @@ fm10k_recv_raw_pkts_vec(void *rx_queue, struct rte_mbuf **rx_pkts,
 		__m128i descs0[RTE_FM10K_DESCS_PER_LOOP];
 		__m128i pkt_mb1, pkt_mb2, pkt_mb3, pkt_mb4;
 		__m128i zero, staterr, sterr_tmp1, sterr_tmp2;
-		__m128i mbp1, mbp2; /* two mbuf pointer in one XMM reg. */
+		__m128i mbp1;
+		/* 2 64 bit or 4 32 bit mbuf pointers in one XMM reg. */
+#if defined(RTE_ARCH_X86_64)
+		__m128i mbp2;
+#endif
 
-		/* B.1 load 1 mbuf point */
+		/* B.1 load 2 (64 bit) or 4 (32 bit) mbuf points */
 		mbp1 = _mm_loadu_si128((__m128i *)&mbufp[pos]);
 
 		/* Read desc statuses backwards to avoid race condition */
@@ -470,11 +469,13 @@ fm10k_recv_raw_pkts_vec(void *rx_queue, struct rte_mbuf **rx_pkts,
 		descs0[3] = _mm_loadu_si128((__m128i *)(rxdp + 3));
 		rte_compiler_barrier();
 
-		/* B.2 copy 2 mbuf point into rx_pkts  */
+		/* B.2 copy 2 64 bit or 4 32 bit mbuf point into rx_pkts */
 		_mm_storeu_si128((__m128i *)&rx_pkts[pos], mbp1);
 
-		/* B.1 load 1 mbuf point */
+#if defined(RTE_ARCH_X86_64)
+		/* B.1 load 2 64 bit mbuf poitns */
 		mbp2 = _mm_loadu_si128((__m128i *)&mbufp[pos+2]);
+#endif
 
 		descs0[2] = _mm_loadu_si128((__m128i *)(rxdp + 2));
 		rte_compiler_barrier();
@@ -483,8 +484,10 @@ fm10k_recv_raw_pkts_vec(void *rx_queue, struct rte_mbuf **rx_pkts,
 		rte_compiler_barrier();
 		descs0[0] = _mm_loadu_si128((__m128i *)(rxdp));
 
+#if defined(RTE_ARCH_X86_64)
 		/* B.2 copy 2 mbuf point into rx_pkts  */
 		_mm_storeu_si128((__m128i *)&rx_pkts[pos+2], mbp2);
+#endif
 
 		/* avoid compiler reorder optimization */
 		rte_compiler_barrier();
@@ -675,6 +678,7 @@ fm10k_recv_scattered_pkts_vec(void *rx_queue,
 			i++;
 		if (i == nb_bufs)
 			return nb_bufs;
+		rxq->pkt_first_seg = rx_pkts[i];
 	}
 	return i + fm10k_reassemble_packets(rxq, &rx_pkts[i], nb_bufs - i,
 		&split_flags[i]);
@@ -694,7 +698,7 @@ int __attribute__((cold))
 fm10k_tx_vec_condition_check(struct fm10k_tx_queue *txq)
 {
 	/* Vector TX can't offload any features yet */
-	if ((txq->txq_flags & FM10K_SIMPLE_TX_FLAG) != FM10K_SIMPLE_TX_FLAG)
+	if (txq->offloads != 0)
 		return -1;
 
 	if (txq->tx_ftag_en)
@@ -708,7 +712,7 @@ vtx1(volatile struct fm10k_tx_desc *txdp,
 		struct rte_mbuf *pkt, uint64_t flags)
 {
 	__m128i descriptor = _mm_set_epi64x(flags << 56 |
-			pkt->vlan_tci << 16 | pkt->data_len,
+			(uint64_t)pkt->vlan_tci << 16 | (uint64_t)pkt->data_len,
 			MBUF_DMA_ADDR(pkt));
 	_mm_store_si128((__m128i *)txdp, descriptor);
 }
@@ -723,7 +727,7 @@ vtx(volatile struct fm10k_tx_desc *txdp,
 		vtx1(txdp, *pkt, flags);
 }
 
-static inline int __attribute__((always_inline))
+static __rte_always_inline int
 fm10k_tx_free_bufs(struct fm10k_tx_queue *txq)
 {
 	struct rte_mbuf **txep;
@@ -744,12 +748,12 @@ fm10k_tx_free_bufs(struct fm10k_tx_queue *txq)
 	 * next_dd - (rs_thresh-1)
 	 */
 	txep = &txq->sw_ring[txq->next_dd - (n - 1)];
-	m = __rte_pktmbuf_prefree_seg(txep[0]);
+	m = rte_pktmbuf_prefree_seg(txep[0]);
 	if (likely(m != NULL)) {
 		free[0] = m;
 		nb_free = 1;
 		for (i = 1; i < n; i++) {
-			m = __rte_pktmbuf_prefree_seg(txep[i]);
+			m = rte_pktmbuf_prefree_seg(txep[i]);
 			if (likely(m != NULL)) {
 				if (likely(m->pool == free[0]->pool))
 					free[nb_free++] = m;
@@ -764,7 +768,7 @@ fm10k_tx_free_bufs(struct fm10k_tx_queue *txq)
 		rte_mempool_put_bulk(free[0]->pool, (void **)free, nb_free);
 	} else {
 		for (i = 1; i < n; i++) {
-			m = __rte_pktmbuf_prefree_seg(txep[i]);
+			m = rte_pktmbuf_prefree_seg(txep[i]);
 			if (m != NULL)
 				rte_mempool_put(m->pool, m);
 		}
@@ -779,7 +783,7 @@ fm10k_tx_free_bufs(struct fm10k_tx_queue *txq)
 	return txq->rs_thresh;
 }
 
-static inline void __attribute__((always_inline))
+static __rte_always_inline void
 tx_backlog_entry(struct rte_mbuf **txep,
 		 struct rte_mbuf **tx_pkts, uint16_t nb_pkts)
 {
@@ -790,8 +794,8 @@ tx_backlog_entry(struct rte_mbuf **txep,
 }
 
 uint16_t
-fm10k_xmit_pkts_vec(void *tx_queue, struct rte_mbuf **tx_pkts,
-			uint16_t nb_pkts)
+fm10k_xmit_fixed_burst_vec(void *tx_queue, struct rte_mbuf **tx_pkts,
+			   uint16_t nb_pkts)
 {
 	struct fm10k_tx_queue *txq = (struct fm10k_tx_queue *)tx_queue;
 	volatile struct fm10k_tx_desc *txdp;

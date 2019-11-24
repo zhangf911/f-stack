@@ -1,32 +1,5 @@
-..  BSD LICENSE
-    Copyright(c) 2010-2016 Intel Corporation. All rights reserved.
-    All rights reserved.
-
-    Redistribution and use in source and binary forms, with or without
-    modification, are permitted provided that the following conditions
-    are met:
-
-    * Redistributions of source code must retain the above copyright
-    notice, this list of conditions and the following disclaimer.
-    * Redistributions in binary form must reproduce the above copyright
-    notice, this list of conditions and the following disclaimer in
-    the documentation and/or other materials provided with the
-    distribution.
-    * Neither the name of Intel Corporation nor the names of its
-    contributors may be used to endorse or promote products derived
-    from this software without specific prior written permission.
-
-    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-    "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-    A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-    OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-    SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-    LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-    DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-    THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-    OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+..  SPDX-License-Identifier: BSD-3-Clause
+    Copyright(c) 2010-2016 Intel Corporation.
 
 Vhost Library
 =============
@@ -46,40 +19,21 @@ vhost library should be able to:
 * Know all the necessary information about the vring:
 
   Information such as where the available ring is stored. Vhost defines some
-  messages to tell the backend all the information it needs to know how to
-  manipulate the vring.
-
-Currently, there are two ways to pass these messages and as a result there are
-two Vhost implementations in DPDK: *vhost-cuse* (where the character devices
-are in user space) and *vhost-user*.
-
-Vhost-cuse creates a user space character device and hook to a function ioctl,
-so that all ioctl commands that are sent from the frontend (QEMU) will be
-captured and handled.
-
-Vhost-user creates a Unix domain socket file through which messages are
-passed.
-
-.. Note::
-
-   Since DPDK v2.2, the majority of the development effort has gone into
-   enhancing vhost-user, such as multiple queue, live migration, and
-   reconnect. Thus, it is strongly advised to use vhost-user instead of
-   vhost-cuse.
+  messages (passed through a Unix domain socket file) to tell the backend all
+  the information it needs to know how to manipulate the vring.
 
 
 Vhost API Overview
 ------------------
 
-The following is an overview of the Vhost API functions:
+The following is an overview of some key Vhost API functions:
 
 * ``rte_vhost_driver_register(path, flags)``
 
-  This function registers a vhost driver into the system. For vhost-cuse, a
-  ``/dev/path`` character device file will be created. For vhost-user server
-  mode, a Unix domain socket file ``path`` will be created.
+  This function registers a vhost driver into the system. ``path`` specifies
+  the Unix domain socket file path.
 
-  Currently two flags are supported (these are valid for vhost-user only):
+  Currently supported flags are:
 
   - ``RTE_VHOST_USER_CLIENT``
 
@@ -97,13 +51,76 @@ The following is an overview of the Vhost API functions:
     This reconnect option is enabled by default. However, it can be turned off
     by setting this flag.
 
-* ``rte_vhost_driver_session_start()``
+  - ``RTE_VHOST_USER_DEQUEUE_ZERO_COPY``
 
-  This function starts the vhost session loop to handle vhost messages. It
-  starts an infinite loop, therefore it should be called in a dedicated
-  thread.
+    Dequeue zero copy will be enabled when this flag is set. It is disabled by
+    default.
 
-* ``rte_vhost_driver_callback_register(virtio_net_device_ops)``
+    There are some truths (including limitations) you might want to know while
+    setting this flag:
+
+    * zero copy is not good for small packets (typically for packet size below
+      512).
+
+    * zero copy is really good for VM2VM case. For iperf between two VMs, the
+      boost could be above 70% (when TSO is enabled).
+
+    * For zero copy in VM2NIC case, guest Tx used vring may be starved if the
+      PMD driver consume the mbuf but not release them timely.
+
+      For example, i40e driver has an optimization to maximum NIC pipeline which
+      postpones returning transmitted mbuf until only tx_free_threshold free
+      descs left. The virtio TX used ring will be starved if the formula
+      (num_i40e_tx_desc - num_virtio_tx_desc > tx_free_threshold) is true, since
+      i40e will not return back mbuf.
+
+      A performance tip for tuning zero copy in VM2NIC case is to adjust the
+      frequency of mbuf free (i.e. adjust tx_free_threshold of i40e driver) to
+      balance consumer and producer.
+
+    * Guest memory should be backended with huge pages to achieve better
+      performance. Using 1G page size is the best.
+
+      When dequeue zero copy is enabled, the guest phys address and host phys
+      address mapping has to be established. Using non-huge pages means far
+      more page segments. To make it simple, DPDK vhost does a linear search
+      of those segments, thus the fewer the segments, the quicker we will get
+      the mapping. NOTE: we may speed it by using tree searching in future.
+
+    * zero copy can not work when using vfio-pci with iommu mode currently, this
+      is because we don't setup iommu dma mapping for guest memory. If you have
+      to use vfio-pci driver, please insert vfio-pci kernel module in noiommu
+      mode.
+
+  - ``RTE_VHOST_USER_IOMMU_SUPPORT``
+
+    IOMMU support will be enabled when this flag is set. It is disabled by
+    default.
+
+    Enabling this flag makes possible to use guest vIOMMU to protect vhost
+    from accessing memory the virtio device isn't allowed to, when the feature
+    is negotiated and an IOMMU device is declared.
+
+    However, this feature enables vhost-user's reply-ack protocol feature,
+    which implementation is buggy in Qemu v2.7.0-v2.9.0 when doing multiqueue.
+    Enabling this flag with these Qemu version results in Qemu being blocked
+    when multiple queue pairs are declared.
+
+  - ``RTE_VHOST_USER_POSTCOPY_SUPPORT``
+
+    Postcopy live-migration support will be enabled when this flag is set.
+    It is disabled by default.
+
+    Enabling this flag should only be done when the calling application does
+    not pre-fault the guest shared memory, otherwise migration would fail.
+
+* ``rte_vhost_driver_set_features(path, features)``
+
+  This function sets the feature bits the vhost-user driver supports. The
+  vhost-user driver could be vhost-user net, yet it could be something else,
+  say, vhost-user SCSI.
+
+* ``rte_vhost_driver_callback_register(path, vhost_device_ops)``
 
   This function registers a set of callbacks, to let DPDK applications take
   the appropriate action when some events happen. The following events are
@@ -111,18 +128,46 @@ The following is an overview of the Vhost API functions:
 
   * ``new_device(int vid)``
 
-    This callback is invoked when a virtio net device becomes ready. ``vid``
-    is the virtio net device ID.
+    This callback is invoked when a virtio device becomes ready. ``vid``
+    is the vhost device ID.
 
   * ``destroy_device(int vid)``
 
-    This callback is invoked when a virtio net device shuts down (or when the
-    vhost connection is broken).
+    This callback is invoked when a virtio device is paused or shut down.
 
   * ``vring_state_changed(int vid, uint16_t queue_id, int enable)``
 
     This callback is invoked when a specific queue's state is changed, for
     example to enabled or disabled.
+
+  * ``features_changed(int vid, uint64_t features)``
+
+    This callback is invoked when the features is changed. For example,
+    ``VHOST_F_LOG_ALL`` will be set/cleared at the start/end of live
+    migration, respectively.
+
+  * ``new_connection(int vid)``
+
+    This callback is invoked on new vhost-user socket connection. If DPDK
+    acts as the server the device should not be deleted before
+    ``destroy_connection`` callback is received.
+
+  * ``destroy_connection(int vid)``
+
+    This callback is invoked when vhost-user socket connection is closed.
+    It indicates that device with id ``vid`` is no longer in use and can be
+    safely deleted.
+
+* ``rte_vhost_driver_disable/enable_features(path, features))``
+
+  This function disables/enables some features. For example, it can be used to
+  disable mergeable buffers and TSO features, which both are enabled by
+  default.
+
+* ``rte_vhost_driver_start(path)``
+
+  This function triggers the vhost-user negotiation. It should be invoked at
+  the end of initializing a vhost-user driver.
 
 * ``rte_vhost_enqueue_burst(vid, queue_id, pkts, count)``
 
@@ -132,42 +177,33 @@ The following is an overview of the Vhost API functions:
 
   Receives (dequeues) ``count`` packets from guest, and stored them at ``pkts``.
 
-* ``rte_vhost_feature_disable/rte_vhost_feature_enable(feature_mask)``
+* ``rte_vhost_crypto_create(vid, cryptodev_id, sess_mempool, socket_id)``
 
-  This function disables/enables some features. For example, it can be used to
-  disable mergeable buffers and TSO features, which both are enabled by
-  default.
+  As an extension of new_device(), this function adds virtio-crypto workload
+  acceleration capability to the device. All crypto workload is processed by
+  DPDK cryptodev with the device ID of ``cryptodev_id``.
 
+* ``rte_vhost_crypto_free(vid)``
 
-Vhost Implementations
----------------------
+  Frees the memory and vhost-user message handlers created in
+  rte_vhost_crypto_create().
 
-Vhost-cuse implementation
-~~~~~~~~~~~~~~~~~~~~~~~~~
+* ``rte_vhost_crypto_fetch_requests(vid, queue_id, ops, nb_ops)``
 
-When vSwitch registers the vhost driver, it will register a cuse device driver
-into the system and creates a character device file. This cuse driver will
-receive vhost open/release/IOCTL messages from the QEMU simulator.
+  Receives (dequeues) ``nb_ops`` virtio-crypto requests from guest, parses
+  them to DPDK Crypto Operations, and fills the ``ops`` with parsing results.
 
-When the open call is received, the vhost driver will create a vhost device
-for the virtio device in the guest.
+* ``rte_vhost_crypto_finalize_requests(queue_id, ops, nb_ops)``
 
-When the ``VHOST_SET_MEM_TABLE`` ioctl is received, vhost searches the memory
-region to find the starting user space virtual address that maps the memory of
-the guest virtual machine. Through this virtual address and the QEMU pid,
-vhost can find the file QEMU uses to map the guest memory. Vhost maps this
-file into its address space, in this way vhost can fully access the guest
-physical memory, which means vhost could access the shared virtio ring and the
-guest physical address specified in the entry of the ring.
+  After the ``ops`` are dequeued from Cryptodev, finalizes the jobs and
+  notifies the guest(s).
 
-The guest virtual machine tells the vhost whether the virtio device is ready
-for processing or is de-activated through the ``VHOST_NET_SET_BACKEND``
-message. The registered callback from vSwitch will be called.
+* ``rte_vhost_crypto_set_zero_copy(vid, option)``
 
-When the release call is made, vhost will destroy the device.
+  Enable or disable zero copy feature of the vhost crypto backend.
 
-Vhost-user implementation
-~~~~~~~~~~~~~~~~~~~~~~~~~
+Vhost-user Implementations
+--------------------------
 
 Vhost-user uses Unix domain sockets for passing messages. This means the DPDK
 vhost-user implementation has two options:
@@ -214,16 +250,94 @@ For ``VHOST_SET_MEM_TABLE`` message, QEMU will send information for each
 memory region and its file descriptor in the ancillary data of the message.
 The file descriptor is used to map that region.
 
-There is no ``VHOST_NET_SET_BACKEND`` message as in vhost-cuse to signal
-whether the virtio device is ready or stopped. Instead,
 ``VHOST_SET_VRING_KICK`` is used as the signal to put the vhost device into
 the data plane, and ``VHOST_GET_VRING_BASE`` is used as the signal to remove
 the vhost device from the data plane.
 
 When the socket connection is closed, vhost will destroy the device.
 
+Guest memory requirement
+------------------------
+
+* Memory pre-allocation
+
+  For non-zerocopy, guest memory pre-allocation is not a must. This can help
+  save of memory. If users really want the guest memory to be pre-allocated
+  (e.g., for performance reason), we can add option ``-mem-prealloc`` when
+  starting QEMU. Or, we can lock all memory at vhost side which will force
+  memory to be allocated when mmap at vhost side; option --mlockall in
+  ovs-dpdk is an example in hand.
+
+  For zerocopy, we force the VM memory to be pre-allocated at vhost lib when
+  mapping the guest memory; and also we need to lock the memory to prevent
+  pages being swapped out to disk.
+
+* Memory sharing
+
+  Make sure ``share=on`` QEMU option is given. vhost-user will not work with
+  a QEMU version without shared memory mapping.
+
 Vhost supported vSwitch reference
 ---------------------------------
 
 For more vhost details and how to support vhost in vSwitch, please refer to
 the vhost example in the DPDK Sample Applications Guide.
+
+Vhost data path acceleration (vDPA)
+-----------------------------------
+
+vDPA supports selective datapath in vhost-user lib by enabling virtio ring
+compatible devices to serve virtio driver directly for datapath acceleration.
+
+``rte_vhost_driver_attach_vdpa_device`` is used to configure the vhost device
+with accelerated backend.
+
+Also vhost device capabilities are made configurable to adopt various devices.
+Such capabilities include supported features, protocol features, queue number.
+
+Finally, a set of device ops is defined for device specific operations:
+
+* ``get_queue_num``
+
+  Called to get supported queue number of the device.
+
+* ``get_features``
+
+  Called to get supported features of the device.
+
+* ``get_protocol_features``
+
+  Called to get supported protocol features of the device.
+
+* ``dev_conf``
+
+  Called to configure the actual device when the virtio device becomes ready.
+
+* ``dev_close``
+
+  Called to close the actual device when the virtio device is stopped.
+
+* ``set_vring_state``
+
+  Called to change the state of the vring in the actual device when vring state
+  changes.
+
+* ``set_features``
+
+  Called to set the negotiated features to device.
+
+* ``migration_done``
+
+  Called to allow the device to response to RARP sending.
+
+* ``get_vfio_group_fd``
+
+   Called to get the VFIO group fd of the device.
+
+* ``get_vfio_device_fd``
+
+  Called to get the VFIO device fd of the device.
+
+* ``get_notify_area``
+
+  Called to get the notify area info of the queue.

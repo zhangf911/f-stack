@@ -1,34 +1,5 @@
-/*-
- *   BSD LICENSE
- *
- *   Copyright(c) 2010-2016 Intel Corporation. All rights reserved.
- *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright(c) 2010-2016 Intel Corporation
  */
 #include <stdint.h>
 #include <string.h>
@@ -228,7 +199,7 @@ static void *
 rte_port_source_create(void *params, int socket_id)
 {
 	struct rte_port_source_params *p =
-			(struct rte_port_source_params *) params;
+			params;
 	struct rte_port_source *port;
 
 	/* Check input arguments*/
@@ -265,7 +236,7 @@ static int
 rte_port_source_free(void *port)
 {
 	struct rte_port_source *p =
-			(struct rte_port_source *)port;
+			port;
 
 	/* Check input parameters */
 	if (p == NULL)
@@ -286,16 +257,11 @@ rte_port_source_free(void *port)
 static int
 rte_port_source_rx(void *port, struct rte_mbuf **pkts, uint32_t n_pkts)
 {
-	struct rte_port_source *p = (struct rte_port_source *) port;
+	struct rte_port_source *p = port;
 	uint32_t i;
 
-	if (rte_mempool_get_bulk(p->mempool, (void **) pkts, n_pkts) != 0)
+	if (rte_pktmbuf_alloc_bulk(p->mempool, pkts, n_pkts) != 0)
 		return 0;
-
-	for (i = 0; i < n_pkts; i++) {
-		rte_mbuf_refcnt_set(pkts[i], 1);
-		rte_pktmbuf_reset(pkts[i]);
-	}
 
 	if (p->pkt_buff != NULL) {
 		for (i = 0; i < n_pkts; i++) {
@@ -323,7 +289,7 @@ rte_port_source_stats_read(void *port,
 		struct rte_port_in_stats *stats, int clear)
 {
 	struct rte_port_source *p =
-		(struct rte_port_source *) port;
+		port;
 
 	if (stats != NULL)
 		memcpy(stats, &p->stats, sizeof(p->stats));
@@ -400,7 +366,7 @@ pcap_sink_open(struct rte_port_sink *port,
 static void
 pcap_sink_write_pkt(struct rte_port_sink *port, struct rte_mbuf *mbuf)
 {
-	uint8_t *pcap_dumper = (uint8_t *)(port->dumper);
+	uint8_t *pcap_dumper = (port->dumper);
 	struct pcap_pkthdr pcap_hdr;
 	uint8_t jumbo_pkt_buf[ETHER_MAX_JUMBO_FRAME_LEN];
 	uint8_t *pkt;
@@ -524,7 +490,7 @@ rte_port_sink_create(void *params, int socket_id)
 static int
 rte_port_sink_tx(void *port, struct rte_mbuf *pkt)
 {
-	struct rte_port_sink *p = (struct rte_port_sink *) port;
+	struct rte_port_sink *p = port;
 
 	RTE_PORT_SINK_STATS_PKTS_IN_ADD(p, 1);
 	if (p->dumper != NULL)
@@ -539,7 +505,7 @@ static int
 rte_port_sink_tx_bulk(void *port, struct rte_mbuf **pkts,
 	uint64_t pkts_mask)
 {
-	struct rte_port_sink *p = (struct rte_port_sink *) port;
+	struct rte_port_sink *p = port;
 
 	if ((pkts_mask & (pkts_mask + 1)) == 0) {
 		uint64_t n_pkts = __builtin_popcountll(pkts_mask);
@@ -591,7 +557,7 @@ static int
 rte_port_sink_flush(void *port)
 {
 	struct rte_port_sink *p =
-			(struct rte_port_sink *)port;
+			port;
 
 	if (p == NULL)
 		return 0;
@@ -605,7 +571,7 @@ static int
 rte_port_sink_free(void *port)
 {
 	struct rte_port_sink *p =
-			(struct rte_port_sink *)port;
+			port;
 
 	if (p == NULL)
 		return 0;
@@ -622,7 +588,7 @@ rte_port_sink_stats_read(void *port, struct rte_port_out_stats *stats,
 		int clear)
 {
 	struct rte_port_sink *p =
-		(struct rte_port_sink *) port;
+		port;
 
 	if (stats != NULL)
 		memcpy(stats, &p->stats, sizeof(p->stats));

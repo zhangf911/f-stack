@@ -1,33 +1,5 @@
-..  BSD LICENSE
-    Copyright(c) 2015 Intel Corporation. All rights reserved.
-    All rights reserved.
-
-    Redistribution and use in source and binary forms, with or without
-    modification, are permitted provided that the following conditions
-    are met:
-
-    * Re-distributions of source code must retain the above copyright
-    notice, this list of conditions and the following disclaimer.
-    * Redistributions in binary form must reproduce the above copyright
-    notice, this list of conditions and the following disclaimer in
-    the documentation and/or other materials provided with the
-    distribution.
-    * Neither the name of Intel Corporation nor the names of its
-    contributors may be used to endorse or promote products derived
-    from this software without specific prior written permission.
-
-    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-    "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-    A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-    OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-    SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-    LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-    DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-    THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-    OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
+..  SPDX-License-Identifier: BSD-3-Clause
+    Copyright(c) 2015 Intel Corporation.
 
 Performance Thread Sample Application
 =====================================
@@ -73,28 +45,10 @@ invalid.
 
 Compiling the Application
 -------------------------
-The application is located in the sample application folder in the
-``performance-thread`` folder.
 
-#.  Go to the example applications folder
+To compile the sample application see :doc:`compiling`.
 
-    .. code-block:: console
-
-       export RTE_SDK=/path/to/rte_sdk
-       cd ${RTE_SDK}/examples/performance-thread/l3fwd-thread
-
-#.  Set the target (a default target is used if not specified). For example:
-
-    .. code-block:: console
-
-       export RTE_TARGET=x86_64-native-linuxapp-gcc
-
-    See the *DPDK Linux Getting Started Guide* for possible RTE_TARGET values.
-
-#.  Build the application:
-
-        make
-
+The application is located in the `performance-thread/l3fwd-thread` sub-directory.
 
 Running the Application
 -----------------------
@@ -107,6 +61,7 @@ The application has a number of command line options::
         --tx(lcore,thread)[,(lcore,thread)]
         [--enable-jumbo] [--max-pkt-len PKTLEN]]  [--no-numa]
         [--hash-entry-num] [--ipv6] [--no-lthreads] [--stat-lcore lcore]
+        [--parse-ptype]
 
 Where:
 
@@ -141,6 +96,9 @@ Where:
 
 * ``--stat-lcore``: optional, run CPU load stats collector on the specified
   lcore.
+
+* ``--parse-ptype:`` optional, set to use software to analyze packet type.
+  Without this option, hardware will check the packet type.
 
 The parameters of the ``--rx`` and ``--tx`` options are:
 
@@ -183,14 +141,14 @@ in ``--rx/--tx`` are used to affinitize threads to the selected scheduler.
 
 For example, the following places every l-thread on different lcores::
 
-   l3fwd-thread -c ff -n 2 -- -P -p 3 \
+   l3fwd-thread -l 0-7 -n 2 -- -P -p 3 \
                 --rx="(0,0,0,0)(1,0,1,1)" \
                 --tx="(2,0)(3,1)"
 
 The following places RX l-threads on lcore 0 and TX l-threads on lcore 1 and 2
 and so on::
 
-   l3fwd-thread -c ff -n 2 -- -P -p 3 \
+   l3fwd-thread -l 0-7 -n 2 -- -P -p 3 \
                 --rx="(0,0,0,0)(1,0,0,1)" \
                 --tx="(1,0)(2,1)"
 
@@ -206,7 +164,7 @@ place every RX and TX thread on different lcores.
 
 For example, the following places every EAL thread on different lcores::
 
-   l3fwd-thread -c ff -n 2 -- -P -p 3 \
+   l3fwd-thread -l 0-7 -n 2 -- -P -p 3 \
                 --rx="(0,0,0,0)(1,0,1,1)" \
                 --tx="(2,0)(3,1)" \
                 --no-lthreads
@@ -218,7 +176,7 @@ parameter is used.
 The following places RX EAL threads on lcore 0 and TX EAL threads on lcore 1
 and 2 and so on::
 
-   l3fwd-thread -c ff -n 2 --lcores="(0,1)@0,(2,3)@1" -- -P -p 3 \
+   l3fwd-thread -l 0-7 -n 2 --lcores="(0,1)@0,(2,3)@1" -- -P -p 3 \
                 --rx="(0,0,0,0)(1,0,1,1)" \
                 --tx="(2,0)(3,1)" \
                 --no-lthreads
@@ -232,13 +190,13 @@ and its corresponding EAL threads command line can be realized as follows:
 
 a) Start every thread on different scheduler (1:1)::
 
-      l3fwd-thread -c ff -n 2 -- -P -p 3 \
+      l3fwd-thread -l 0-7 -n 2 -- -P -p 3 \
                    --rx="(0,0,0,0)(1,0,1,1)" \
                    --tx="(2,0)(3,1)"
 
    EAL thread equivalent::
 
-      l3fwd-thread -c ff -n 2 -- -P -p 3 \
+      l3fwd-thread -l 0-7 -n 2 -- -P -p 3 \
                    --rx="(0,0,0,0)(1,0,1,1)" \
                    --tx="(2,0)(3,1)" \
                    --no-lthreads
@@ -247,13 +205,13 @@ b) Start all threads on one core (N:1).
 
    Start 4 L-threads on lcore 0::
 
-      l3fwd-thread -c ff -n 2 -- -P -p 3 \
+      l3fwd-thread -l 0-7 -n 2 -- -P -p 3 \
                    --rx="(0,0,0,0)(1,0,0,1)" \
                    --tx="(0,0)(0,1)"
 
    Start 4 EAL threads on cpu-set 0::
 
-      l3fwd-thread -c ff -n 2 --lcores="(0-3)@0" -- -P -p 3 \
+      l3fwd-thread -l 0-7 -n 2 --lcores="(0-3)@0" -- -P -p 3 \
                    --rx="(0,0,0,0)(1,0,0,1)" \
                    --tx="(2,0)(3,1)" \
                    --no-lthreads
@@ -262,14 +220,14 @@ c) Start threads on different cores (N:M).
 
    Start 2 L-threads for RX on lcore 0, and 2 L-threads for TX on lcore 1::
 
-      l3fwd-thread -c ff -n 2 -- -P -p 3 \
+      l3fwd-thread -l 0-7 -n 2 -- -P -p 3 \
                    --rx="(0,0,0,0)(1,0,0,1)" \
                    --tx="(1,0)(1,1)"
 
    Start 2 EAL threads for RX on cpu-set 0, and 2 EAL threads for TX on
    cpu-set 1::
 
-      l3fwd-thread -c ff -n 2 --lcores="(0-1)@0,(2-3)@1" -- -P -p 3 \
+      l3fwd-thread -l 0-7 -n 2 --lcores="(0-1)@0,(2-3)@1" -- -P -p 3 \
                    --rx="(0,0,0,0)(1,0,1,1)" \
                    --tx="(2,0)(3,1)" \
                    --no-lthreads
@@ -324,7 +282,7 @@ interconnected via software rings.
 On initialization an L-thread scheduler is started on every EAL thread. On all
 but the master EAL thread only a a dummy L-thread is initially started.
 The L-thread started on the master EAL thread then spawns other L-threads on
-different L-thread schedulers according the the command line parameters.
+different L-thread schedulers according the command line parameters.
 
 The RX threads poll the network interface queues and post received packets
 to a TX thread via the corresponding software ring.
@@ -542,8 +500,8 @@ An application may save and retrieve a single pointer to application data in
 the L-thread struct.
 
 For legacy and backward compatibility reasons two alternative methods are also
-offered, the first is modelled directly on the pthread get/set specific APIs,
-the second approach is modelled on the ``RTE_PER_LCORE`` macros, whereby
+offered, the first is modeled directly on the pthread get/set specific APIs,
+the second approach is modeled on the ``RTE_PER_LCORE`` macros, whereby
 ``PER_LTHREAD`` macros are introduced, in both cases the storage is local to
 the L-thread.
 

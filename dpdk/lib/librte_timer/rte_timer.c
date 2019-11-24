@@ -1,34 +1,5 @@
-/*-
- *   BSD LICENSE
- *
- *   Copyright(c) 2010-2014 Intel Corporation. All rights reserved.
- *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright(c) 2010-2014 Intel Corporation
  */
 
 #include <string.h>
@@ -43,14 +14,13 @@
 #include <rte_cycles.h>
 #include <rte_per_lcore.h>
 #include <rte_memory.h>
-#include <rte_memzone.h>
 #include <rte_launch.h>
 #include <rte_eal.h>
-#include <rte_per_lcore.h>
 #include <rte_lcore.h>
 #include <rte_branch_prediction.h>
 #include <rte_spinlock.h>
 #include <rte_random.h>
+#include <rte_pause.h>
 
 #include "rte_timer.h"
 
@@ -183,7 +153,7 @@ timer_set_running_state(struct rte_timer *tim)
 			return -1;
 
 		/* here, we know that timer is stopped or pending,
-		 * mark it atomically as beeing configured */
+		 * mark it atomically as being configured */
 		status.state = RTE_TIMER_RUNNING;
 		status.owner = (int16_t)lcore_id;
 		success = rte_atomic32_cmpset(&tim->status.u32,
@@ -196,7 +166,7 @@ timer_set_running_state(struct rte_timer *tim)
 
 /*
  * Return a skiplist level for a new entry.
- * This probabalistically gives a level with p=1/4 that an entry at level n
+ * This probabilistically gives a level with p=1/4 that an entry at level n
  * will also appear at level n+1.
  */
 static uint32_t
@@ -271,23 +241,16 @@ timer_get_prev_entries_for_node(struct rte_timer *tim, unsigned tim_lcore,
 	}
 }
 
-/*
- * add in list, lock if needed
+/* call with lock held as necessary
+ * add in list
  * timer must be in config state
  * timer must not be in a list
  */
 static void
-timer_add(struct rte_timer *tim, unsigned tim_lcore, int local_is_locked)
+timer_add(struct rte_timer *tim, unsigned int tim_lcore)
 {
-	unsigned lcore_id = rte_lcore_id();
 	unsigned lvl;
 	struct rte_timer *prev[MAX_SKIPLIST_DEPTH+1];
-
-	/* if timer needs to be scheduled on another core, we need to
-	 * lock the list; if it is on local core, we need to lock if
-	 * we are not called from rte_timer_manage() */
-	if (tim_lcore != lcore_id || !local_is_locked)
-		rte_spinlock_lock(&priv_timer[tim_lcore].list_lock);
 
 	/* find where exactly this element goes in the list of elements
 	 * for each depth. */
@@ -312,9 +275,6 @@ timer_add(struct rte_timer *tim, unsigned tim_lcore, int local_is_locked)
 	 * NOTE: this is not atomic on 32-bit*/
 	priv_timer[tim_lcore].pending_head.expire = priv_timer[tim_lcore].\
 			pending_head.sl_next[0]->expire;
-
-	if (tim_lcore != lcore_id || !local_is_locked)
-		rte_spinlock_unlock(&priv_timer[tim_lcore].list_lock);
 }
 
 /*
@@ -409,8 +369,15 @@ __rte_timer_reset(struct rte_timer *tim, uint64_t expire,
 	tim->f = fct;
 	tim->arg = arg;
 
+	/* if timer needs to be scheduled on another core, we need to
+	 * lock the destination list; if it is on local core, we need to lock if
+	 * we are not called from rte_timer_manage()
+	 */
+	if (tim_lcore != lcore_id || !local_is_locked)
+		rte_spinlock_lock(&priv_timer[tim_lcore].list_lock);
+
 	__TIMER_STAT_ADD(pending, 1);
-	timer_add(tim, tim_lcore, local_is_locked);
+	timer_add(tim, tim_lcore);
 
 	/* update state: as we are in CONFIG state, only us can modify
 	 * the state so we don't need to use cmpset() here */
@@ -418,6 +385,9 @@ __rte_timer_reset(struct rte_timer *tim, uint64_t expire,
 	status.state = RTE_TIMER_PENDING;
 	status.owner = (int16_t)tim_lcore;
 	tim->status.u32 = status.u32;
+
+	if (tim_lcore != lcore_id || !local_is_locked)
+		rte_spinlock_unlock(&priv_timer[tim_lcore].list_lock);
 
 	return 0;
 }
@@ -432,7 +402,8 @@ rte_timer_reset(struct rte_timer *tim, uint64_t ticks,
 	uint64_t period;
 
 	if (unlikely((tim_lcore != (unsigned)LCORE_ID_ANY) &&
-			!rte_lcore_is_enabled(tim_lcore)))
+			!(rte_lcore_is_enabled(tim_lcore) ||
+			  rte_lcore_has_role(tim_lcore, ROLE_SERVICE))))
 		return -1;
 
 	if (type == PERIODICAL)
@@ -525,7 +496,7 @@ void rte_timer_manage(void)
 		return;
 	cur_time = rte_get_timer_cycles();
 
-#ifdef RTE_ARCH_X86_64
+#ifdef RTE_ARCH_64
 	/* on 64-bit the value cached in the pending_head.expired will be
 	 * updated atomically, so we can consult that for a quick check here
 	 * outside the lock */

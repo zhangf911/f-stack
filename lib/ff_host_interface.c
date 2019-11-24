@@ -45,12 +45,24 @@
 #include "ff_host_interface.h"
 #include "ff_errno.h"
 
+static struct timespec current_ts;
+extern void* ff_mem_get_page();
+extern int ff_mem_free_addr(void* p);
+
 void *
 ff_mmap(void *addr, uint64_t len, int prot, int flags, int fd, uint64_t offset)
 {
     //return rte_malloc("", len, 4096);
     int host_prot;
     int host_flags;
+
+#ifdef FF_USE_PAGE_ARRAY
+        if( len == 4096 ){
+            return ff_mem_get_page();
+        }
+        else
+#endif
+        {
 
     assert(ff_PROT_NONE == PROT_NONE);
     host_prot = 0;
@@ -69,11 +81,17 @@ ff_mmap(void *addr, uint64_t len, int prot, int flags, int fd, uint64_t offset)
         exit(1);
     }
     return ret;
+    }
 }
 
 int
 ff_munmap(void *addr, uint64_t len)
 {
+#ifdef FF_USE_PAGE_ARRAY
+        if ( len == 4096 ){
+            return ff_mem_free_addr(addr);
+        }
+#endif
     //rte_free(addr);
     //return 0;
     return (munmap(addr, len));
@@ -165,34 +183,29 @@ ff_clock_gettime_ns(int id)
 {
     int64_t sec;
     long nsec;
-     
+
     ff_clock_gettime(id, &sec, &nsec);
 
     return ((uint64_t)sec * ff_NSEC_PER_SEC + nsec);
 }
 
-/*
- *  Sleeps for at least the given number of nanoseconds and returns 0,
- *  unless there is a non-EINTR failure, in which case a non-zero value is
- *  returned.
- */
-int
-ff_nanosleep(uint64_t nsecs)
+void
+ff_get_current_time(time_t *sec, long *nsec)
 {
-    struct timespec ts;
-    struct timespec rts;
-    int rv;
-
-    ts.tv_sec = nsecs / ff_NSEC_PER_SEC;
-    ts.tv_nsec = nsecs % ff_NSEC_PER_SEC;
-    while ((-1 == (rv = nanosleep(&ts, &rts))) && (EINTR == errno)) {
-        ts = rts;
-    }
-    if (-1 == rv) {
-        rv = errno;
+    if (sec) {
+        *sec = current_ts.tv_sec;
     }
 
-    return (rv);
+    if (nsec) {
+        *nsec = current_ts.tv_nsec;
+    }
+}
+
+void
+ff_update_current_ts()
+{
+    int rv = clock_gettime(CLOCK_REALTIME, &current_ts);
+    assert(rv == 0);
 }
 
 void
@@ -200,7 +213,7 @@ ff_arc4rand(void *ptr, unsigned int len, int reseed)
 {
     (void)reseed;
 
-    RAND_pseudo_bytes(ptr, len);
+    RAND_bytes(ptr, len);
 }
 
 uint32_t

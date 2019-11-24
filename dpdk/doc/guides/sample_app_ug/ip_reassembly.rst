@@ -1,32 +1,5 @@
-..  BSD LICENSE
-    Copyright(c) 2010-2014 Intel Corporation. All rights reserved.
-    All rights reserved.
-
-    Redistribution and use in source and binary forms, with or without
-    modification, are permitted provided that the following conditions
-    are met:
-
-    * Redistributions of source code must retain the above copyright
-    notice, this list of conditions and the following disclaimer.
-    * Redistributions in binary form must reproduce the above copyright
-    notice, this list of conditions and the following disclaimer in
-    the documentation and/or other materials provided with the
-    distribution.
-    * Neither the name of Intel Corporation nor the names of its
-    contributors may be used to endorse or promote products derived
-    from this software without specific prior written permission.
-
-    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-    "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-    A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-    OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-    SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-    LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-    DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-    THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-    OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+..  SPDX-License-Identifier: BSD-3-Clause
+    Copyright(c) 2010-2014 Intel Corporation.
 
 IP Reassembly Sample Application
 ================================
@@ -50,31 +23,17 @@ There are two key differences from the L2 Forwarding sample application:
 
 *   The second difference is that the application differentiates between IP and non-IP traffic by means of offload flags.
 
-The Longest Prefix Match (LPM for IPv4, LPM6 for IPv6) table is used to store/lookup an outgoing port number, associated with that IPv4 address. Any unmatched packets are forwarded to the originating port.Compiling the Application
---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+The Longest Prefix Match (LPM for IPv4, LPM6 for IPv6) table is used to store/lookup an outgoing port number,
+associated with that IPv4 address. Any unmatched packets are forwarded to the originating port.
 
-To compile the application:
 
-#.  Go to the sample application directory:
+Compiling the Application
+-------------------------
 
-   .. code-block:: console
+To compile the sample application see :doc:`compiling`.
 
-        export RTE_SDK=/path/to/rte_sdk
-        cd ${RTE_SDK}/examples/ip_reassembly
+The application is located in the ``ip_reassembly`` sub-directory.
 
-#.  Set the target (a default target is used if not specified). For example:
-
-   .. code-block:: console
-
-        export RTE_TARGET=x86_64-native-linuxapp-gcc
-
-See the *DPDK Getting Started Guide* for possible RTE_TARGET values.
-
-#.  Build the application:
-
-   .. code-block:: console
-
-        make
 
 Running the Application
 -----------------------
@@ -102,7 +61,7 @@ To run the example in linuxapp environment with 2 lcores (2,4) over 2 ports(0,2)
 
 .. code-block:: console
 
-    ./build/ip_reassembly -c 0x14 -n 3 -- -p 5
+    ./build/ip_reassembly -l 2,4 -n 3 -- -p 5
     EAL: coremask set to 14
     EAL: Detected lcore 0 on socket 0
     EAL: Detected lcore 1 on socket 1
@@ -133,7 +92,7 @@ To run the example in linuxapp environment with 1 lcore (4) over 2 ports(0,2) wi
 
 .. code-block:: console
 
-    ./build/ip_reassembly -c 0x10 -n 3 -- -p 5 -q 2
+    ./build/ip_reassembly -l 4 -n 3 -- -p 5 -q 2
 
 To test the application, flows should be set up in the flow generator that match the values in the
 l3fwd_ipv4_route_array and/or l3fwd_ipv6_route_array table.

@@ -27,12 +27,20 @@
 #ifndef __FSTACK_CONFIG_H
 #define __FSTACK_CONFIG_H
 
-// dpdk argc, argv, max argc: 4, member of dpdk_config
-#define DPDK_CONFIG_NUM 4
-#define DPDK_CONFIG_MAXLEN 64
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// dpdk argc, argv, max argc: 16, member of dpdk_config
+#define DPDK_CONFIG_NUM 16
+#define DPDK_CONFIG_MAXLEN 256
+#define DPDK_MAX_LCORE 128
 
 extern int dpdk_argc;
 extern char *dpdk_argv[DPDK_CONFIG_NUM + 1];
+
+#define MAX_PKT_BURST 32
+#define BURST_TX_DRAIN_US 100 /* TX drain every ~100us */
 
 struct ff_hw_features {
     uint8_t rx_csum;
@@ -52,6 +60,36 @@ struct ff_port_cfg {
     char *broadcast;
     char *gateway;
     char *pcap;
+
+    int nb_lcores;
+    int nb_slaves;
+    uint16_t lcore_list[DPDK_MAX_LCORE];
+    uint16_t *slave_portid_list;
+};
+
+struct ff_vdev_cfg {
+    char *name;
+    char *iface;
+    char *path;
+    char *mac;
+    uint8_t vdev_id;
+    uint8_t nb_queues;
+    uint8_t nb_cq;
+    uint16_t queue_size;
+};
+
+struct ff_bond_cfg {
+    char *name;
+    char *slave;
+    char *primary;
+    char *bond_mac;
+    char *xmit_policy;
+    uint8_t bond_id;
+    uint8_t mode;
+    uint8_t socket_id;
+    uint8_t lsc_poll_period_ms;
+    uint16_t up_delay;
+    uint16_t down_delay;
 };
 
 struct ff_freebsd_cfg {
@@ -63,25 +101,46 @@ struct ff_freebsd_cfg {
 };
 
 struct ff_config {
+    char *filename;
     struct {
+        char *proc_type;
         /* mask of enabled lcores */
         char *lcore_mask;
         /* mask of current proc on all lcores */
         char *proc_mask;
-        /* mask of enabled ports
-         * use uint32_t because num of max ports is 32
-         */
-        uint32_t port_mask;
+
+        /* specify base virtual address to map. */
+        char *base_virtaddr;
+
         int nb_channel;
         int memory;
         int no_huge;
         int nb_procs;
         int proc_id;
-        int nb_ports;
         int promiscuous;
+        int nb_vdev;
+        int nb_bond;
         int numa_on;
         int tso;
+        int tx_csum_offoad_skip;
+        int vlan_strip;
+
+        /* sleep x microseconds when no pkts incomming */
+        unsigned idle_sleep;
+
+        /* TX burst queue drain nodelay dalay time */
+        unsigned pkt_tx_delay;
+
+        /* list of proc-lcore */
+        uint16_t *proc_lcore;
+
+        int nb_ports;
+        uint16_t max_portid;
+        uint16_t *portid_list;
+        // MAP(portid => struct ff_port_cfg*)
         struct ff_port_cfg *port_cfgs;
+        struct ff_vdev_cfg *vdev_cfgs;
+        struct ff_bond_cfg *bond_cfgs;
     } dpdk;
 
     struct {
@@ -101,11 +160,17 @@ struct ff_config {
         struct ff_freebsd_cfg *sysctl;
         long physmem;
         int hz;
+        int fd_reserve;
+        int mem_size;
     } freebsd;
 };
 
 extern struct ff_config ff_global_cfg;
 
-int ff_load_config(const char *conf, int argc, char * const argv[]);
+int ff_load_config(int argc, char * const argv[]);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* ifndef __FSTACK_CONFIG_H */

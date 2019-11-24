@@ -1,32 +1,5 @@
-..  BSD LICENSE
-    Copyright(c) 2010-2014 Intel Corporation. All rights reserved.
-    All rights reserved.
-
-    Redistribution and use in source and binary forms, with or without
-    modification, are permitted provided that the following conditions
-    are met:
-
-    * Redistributions of source code must retain the above copyright
-    notice, this list of conditions and the following disclaimer.
-    * Redistributions in binary form must reproduce the above copyright
-    notice, this list of conditions and the following disclaimer in
-    the documentation and/or other materials provided with the
-    distribution.
-    * Neither the name of Intel Corporation nor the names of its
-    contributors may be used to endorse or promote products derived
-    from this software without specific prior written permission.
-
-    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-    "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-    A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-    OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-    SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-    LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-    DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-    THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-    OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+..  SPDX-License-Identifier: BSD-3-Clause
+    Copyright(c) 2010-2014 Intel Corporation.
 
 .. _building_from_source:
 
@@ -88,7 +61,7 @@ The ports required and their locations are as follows:
 For compiling and using the DPDK with gcc, the compiler must be installed
 from the ports collection:
 
-* gcc: version 4.8 is recommended ``/usr/ports/lang/gcc48``.
+* gcc: version 4.9 is recommended ``/usr/ports/lang/gcc49``.
   Ensure that ``CPU_OPTS`` is selected (default is OFF).
 
 When running the make config-recursive command, a dialog may be presented to the
@@ -111,10 +84,6 @@ First, uncompress the archive and move to the DPDK source directory:
     unzip DPDK-<version>.zip
     cd DPDK-<version>
 
-    ls
-    app/ config/ examples/ lib/ LICENSE.GPL LICENSE.LGPL Makefile
-    mk/ scripts/ tools/
-
 The DPDK is composed of several directories:
 
 *   lib: Source code of DPDK libraries
@@ -123,7 +92,7 @@ The DPDK is composed of several directories:
 
 *   examples: Source code of DPDK applications
 
-*   config, tools, scripts, mk: Framework-related makefiles, scripts and configuration
+*   config, buildtools, mk: Framework-related makefiles, scripts and configuration
 
 Installation of the DPDK Target Environments
 --------------------------------------------
@@ -168,7 +137,7 @@ For example to compile for FreeBSD use:
    If the compiler binary to be used does not correspond to that given in the
    TOOLCHAIN part of the target, the compiler command may need to be explicitly
    specified. For example, if compiling for gcc, where the gcc binary is called
-   gcc4.8, the command would need to be ``gmake install T=<target> CC=gcc4.8``.
+   gcc4.9, the command would need to be ``gmake install T=<target> CC=gcc4.9``.
 
 Browsing the Installed DPDK Environment Target
 ----------------------------------------------
@@ -177,14 +146,7 @@ Once a target is created, it contains all the libraries and header files for the
 DPDK environment that are required to build customer applications.
 In addition, the test and testpmd applications are built under the build/app
 directory, which may be used for testing.  A kmod directory is also present that
-contains the kernel modules to install:
-
-.. code-block:: console
-
-    ls x86_64-native-bsdapp-gcc
-
-    app build include kmod lib Makefile
-
+contains the kernel modules to install.
 
 .. _loading_contigmem:
 

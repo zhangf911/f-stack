@@ -1,34 +1,5 @@
-/*-
- *   BSD LICENSE
- *
- *   Copyright(c) 2010-2015 Intel Corporation. All rights reserved.
- *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright(c) 2010-2016 Intel Corporation
  */
 #include <stdio.h>
 #include <string.h>
@@ -36,6 +7,10 @@
 #include <rte_version.h>
 #include <rte_ethdev.h>
 #include <rte_ether.h>
+#include <rte_bus_pci.h>
+#ifdef RTE_LIBRTE_IXGBE_PMD
+#include <rte_pmd_ixgbe.h>
+#endif
 #include "rte_ethtool.h"
 
 #define PKTPOOL_SIZE 512
@@ -43,16 +18,27 @@
 
 
 int
-rte_ethtool_get_drvinfo(uint8_t port_id, struct ethtool_drvinfo *drvinfo)
+rte_ethtool_get_drvinfo(uint16_t port_id, struct ethtool_drvinfo *drvinfo)
 {
 	struct rte_eth_dev_info dev_info;
 	struct rte_dev_reg_info reg_info;
+	const struct rte_pci_device *pci_dev;
+	const struct rte_bus *bus = NULL;
 	int n;
+	int ret;
 
 	if (drvinfo == NULL)
 		return -EINVAL;
 
 	RTE_ETH_VALID_PORTID_OR_ERR_RET(port_id, -ENODEV);
+
+	ret = rte_eth_dev_fw_version_get(port_id, drvinfo->fw_version,
+			      sizeof(drvinfo->fw_version));
+	if (ret < 0)
+		printf("firmware version get error: (%s)\n", strerror(-ret));
+	else if (ret > 0)
+		printf("Insufficient fw version buffer size, "
+		       "the minimum size should be %d\n", ret);
 
 	memset(&dev_info, 0, sizeof(dev_info));
 	rte_eth_dev_info_get(port_id, &dev_info);
@@ -61,10 +47,18 @@ rte_ethtool_get_drvinfo(uint8_t port_id, struct ethtool_drvinfo *drvinfo)
 		dev_info.driver_name);
 	snprintf(drvinfo->version, sizeof(drvinfo->version), "%s",
 		rte_version());
-	snprintf(drvinfo->bus_info, sizeof(drvinfo->bus_info),
-		"%04x:%02x:%02x.%x",
-		dev_info.pci_dev->addr.domain, dev_info.pci_dev->addr.bus,
-		dev_info.pci_dev->addr.devid, dev_info.pci_dev->addr.function);
+	/* TODO: replace bus_info by rte_devargs.name */
+	if (dev_info.device)
+		bus = rte_bus_find_by_device(dev_info.device);
+	if (bus && !strcmp(bus->name, "pci")) {
+		pci_dev = RTE_DEV_TO_PCI(dev_info.device);
+		snprintf(drvinfo->bus_info, sizeof(drvinfo->bus_info),
+			"%04x:%02x:%02x.%x",
+			pci_dev->addr.domain, pci_dev->addr.bus,
+			pci_dev->addr.devid, pci_dev->addr.function);
+	} else {
+		snprintf(drvinfo->bus_info, sizeof(drvinfo->bus_info), "N/A");
+	}
 
 	memset(&reg_info, 0, sizeof(reg_info));
 	rte_eth_dev_get_reg_info(port_id, &reg_info);
@@ -87,7 +81,7 @@ rte_ethtool_get_drvinfo(uint8_t port_id, struct ethtool_drvinfo *drvinfo)
 }
 
 int
-rte_ethtool_get_regs_len(uint8_t port_id)
+rte_ethtool_get_regs_len(uint16_t port_id)
 {
 	struct rte_dev_reg_info reg_info;
 	int ret;
@@ -102,7 +96,7 @@ rte_ethtool_get_regs_len(uint8_t port_id)
 }
 
 int
-rte_ethtool_get_regs(uint8_t port_id, struct ethtool_regs *regs, void *data)
+rte_ethtool_get_regs(uint16_t port_id, struct ethtool_regs *regs, void *data)
 {
 	struct rte_dev_reg_info reg_info;
 	int status;
@@ -122,7 +116,7 @@ rte_ethtool_get_regs(uint8_t port_id, struct ethtool_regs *regs, void *data)
 }
 
 int
-rte_ethtool_get_link(uint8_t port_id)
+rte_ethtool_get_link(uint16_t port_id)
 {
 	struct rte_eth_link link;
 
@@ -132,13 +126,13 @@ rte_ethtool_get_link(uint8_t port_id)
 }
 
 int
-rte_ethtool_get_eeprom_len(uint8_t port_id)
+rte_ethtool_get_eeprom_len(uint16_t port_id)
 {
 	return rte_eth_dev_get_eeprom_length(port_id);
 }
 
 int
-rte_ethtool_get_eeprom(uint8_t port_id, struct ethtool_eeprom *eeprom,
+rte_ethtool_get_eeprom(uint16_t port_id, struct ethtool_eeprom *eeprom,
 	void *words)
 {
 	struct rte_dev_eeprom_info eeprom_info;
@@ -161,7 +155,7 @@ rte_ethtool_get_eeprom(uint8_t port_id, struct ethtool_eeprom *eeprom,
 }
 
 int
-rte_ethtool_set_eeprom(uint8_t port_id, struct ethtool_eeprom *eeprom,
+rte_ethtool_set_eeprom(uint16_t port_id, struct ethtool_eeprom *eeprom,
 	void *words)
 {
 	struct rte_dev_eeprom_info eeprom_info;
@@ -184,7 +178,37 @@ rte_ethtool_set_eeprom(uint8_t port_id, struct ethtool_eeprom *eeprom,
 }
 
 int
-rte_ethtool_get_pauseparam(uint8_t port_id,
+rte_ethtool_get_module_info(uint16_t port_id, uint32_t *modinfo)
+{
+	struct rte_eth_dev_module_info *info;
+
+	info = (struct rte_eth_dev_module_info *)modinfo;
+	return rte_eth_dev_get_module_info(port_id, info);
+}
+
+int
+rte_ethtool_get_module_eeprom(uint16_t port_id, struct ethtool_eeprom *eeprom,
+	void *words)
+{
+	struct rte_dev_eeprom_info eeprom_info;
+	int status;
+
+	if (eeprom == NULL || words == NULL)
+		return -EINVAL;
+
+	eeprom_info.offset = eeprom->offset;
+	eeprom_info.length = eeprom->len;
+	eeprom_info.data = words;
+
+	status = rte_eth_dev_get_module_eeprom(port_id, &eeprom_info);
+	if (status)
+		return status;
+
+	return 0;
+}
+
+int
+rte_ethtool_get_pauseparam(uint16_t port_id,
 	struct ethtool_pauseparam *pause_param)
 {
 	struct rte_eth_fc_conf fc_conf;
@@ -219,7 +243,7 @@ rte_ethtool_get_pauseparam(uint8_t port_id,
 }
 
 int
-rte_ethtool_set_pauseparam(uint8_t port_id,
+rte_ethtool_set_pauseparam(uint16_t port_id,
 	struct ethtool_pauseparam *pause_param)
 {
 	struct rte_eth_fc_conf fc_conf;
@@ -262,7 +286,7 @@ rte_ethtool_set_pauseparam(uint8_t port_id,
 }
 
 int
-rte_ethtool_net_open(uint8_t port_id)
+rte_ethtool_net_open(uint16_t port_id)
 {
 	rte_eth_dev_stop(port_id);
 
@@ -270,7 +294,7 @@ rte_ethtool_net_open(uint8_t port_id)
 }
 
 int
-rte_ethtool_net_stop(uint8_t port_id)
+rte_ethtool_net_stop(uint16_t port_id)
 {
 	RTE_ETH_VALID_PORTID_OR_ERR_RET(port_id, -ENODEV);
 	rte_eth_dev_stop(port_id);
@@ -279,7 +303,7 @@ rte_ethtool_net_stop(uint8_t port_id)
 }
 
 int
-rte_ethtool_net_get_mac_addr(uint8_t port_id, struct ether_addr *addr)
+rte_ethtool_net_get_mac_addr(uint16_t port_id, struct ether_addr *addr)
 {
 	RTE_ETH_VALID_PORTID_OR_ERR_RET(port_id, -ENODEV);
 	if (addr == NULL)
@@ -290,7 +314,7 @@ rte_ethtool_net_get_mac_addr(uint8_t port_id, struct ether_addr *addr)
 }
 
 int
-rte_ethtool_net_set_mac_addr(uint8_t port_id, struct ether_addr *addr)
+rte_ethtool_net_set_mac_addr(uint16_t port_id, struct ether_addr *addr)
 {
 	if (addr == NULL)
 		return -EINVAL;
@@ -298,7 +322,7 @@ rte_ethtool_net_set_mac_addr(uint8_t port_id, struct ether_addr *addr)
 }
 
 int
-rte_ethtool_net_validate_addr(uint8_t port_id __rte_unused,
+rte_ethtool_net_validate_addr(uint16_t port_id __rte_unused,
 	struct ether_addr *addr)
 {
 	if (addr == NULL)
@@ -307,7 +331,7 @@ rte_ethtool_net_validate_addr(uint8_t port_id __rte_unused,
 }
 
 int
-rte_ethtool_net_change_mtu(uint8_t port_id, int mtu)
+rte_ethtool_net_change_mtu(uint16_t port_id, int mtu)
 {
 	if (mtu < 0 || mtu > UINT16_MAX)
 		return -EINVAL;
@@ -315,7 +339,7 @@ rte_ethtool_net_change_mtu(uint8_t port_id, int mtu)
 }
 
 int
-rte_ethtool_net_get_stats64(uint8_t port_id, struct rte_eth_stats *stats)
+rte_ethtool_net_get_stats64(uint16_t port_id, struct rte_eth_stats *stats)
 {
 	if (stats == NULL)
 		return -EINVAL;
@@ -323,13 +347,13 @@ rte_ethtool_net_get_stats64(uint8_t port_id, struct rte_eth_stats *stats)
 }
 
 int
-rte_ethtool_net_vlan_rx_add_vid(uint8_t port_id, uint16_t vid)
+rte_ethtool_net_vlan_rx_add_vid(uint16_t port_id, uint16_t vid)
 {
 	return rte_eth_dev_vlan_filter(port_id, vid, 1);
 }
 
 int
-rte_ethtool_net_vlan_rx_kill_vid(uint8_t port_id, uint16_t vid)
+rte_ethtool_net_vlan_rx_kill_vid(uint16_t port_id, uint16_t vid)
 {
 	return rte_eth_dev_vlan_filter(port_id, vid, 0);
 }
@@ -342,7 +366,7 @@ rte_ethtool_net_vlan_rx_kill_vid(uint8_t port_id, uint16_t vid)
  * driver can register device-specific implementation
  */
 int
-rte_ethtool_net_set_rx_mode(uint8_t port_id)
+rte_ethtool_net_set_rx_mode(uint16_t port_id)
 {
 	uint16_t num_vfs;
 	struct rte_eth_dev_info dev_info;
@@ -353,9 +377,12 @@ rte_ethtool_net_set_rx_mode(uint8_t port_id)
 	num_vfs = dev_info.max_vfs;
 
 	/* Set VF vf_rx_mode, VF unsupport status is discard */
-	for (vf = 0; vf < num_vfs; vf++)
-		rte_eth_dev_set_vf_rxmode(port_id, vf,
+	for (vf = 0; vf < num_vfs; vf++) {
+#ifdef RTE_LIBRTE_IXGBE_PMD
+		rte_pmd_ixgbe_set_vf_rxmode(port_id, vf,
 			ETH_VMDQ_ACCEPT_UNTAG, 0);
+#endif
+	}
 
 	/* Enable Rx vlan filter, VF unspport status is discard */
 	rte_eth_dev_set_vlan_offload(port_id, ETH_VLAN_FILTER_MASK);
@@ -365,7 +392,7 @@ rte_ethtool_net_set_rx_mode(uint8_t port_id)
 
 
 int
-rte_ethtool_get_ringparam(uint8_t port_id,
+rte_ethtool_get_ringparam(uint16_t port_id,
 	struct ethtool_ringparam *ring_param)
 {
 	struct rte_eth_dev_info dev_info;
@@ -397,7 +424,7 @@ rte_ethtool_get_ringparam(uint8_t port_id,
 
 
 int
-rte_ethtool_set_ringparam(uint8_t port_id,
+rte_ethtool_set_ringparam(uint16_t port_id,
 	struct ethtool_ringparam *ring_param)
 {
 	struct rte_eth_rxq_info rx_qinfo;

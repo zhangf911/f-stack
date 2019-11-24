@@ -1,34 +1,5 @@
-/*-
- *   BSD LICENSE
- *
- *   Copyright(c) 2016 Intel Corporation. All rights reserved.
- *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright(c) 2016 Intel Corporation
  */
 
 #ifndef _RTE_PDUMP_H_
@@ -40,6 +11,10 @@
  *
  * packet dump library to provide packet capturing support on dpdk.
  */
+
+#include <stdint.h>
+#include <rte_mempool.h>
+#include <rte_ring.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -62,10 +37,10 @@ enum rte_pdump_socktype {
 /**
  * Initialize packet capturing handling
  *
- * Creates pthread and server socket for handling clients
- * requests to enable/disable rxtx callbacks.
+ * Register the IPC action for communication with target (primary) process.
  *
  * @param path
+ * This parameter is going to be deprecated; it was used for specifying the
  * directory path for server socket.
  *
  * @return
@@ -77,7 +52,7 @@ rte_pdump_init(const char *path);
 /**
  * Un initialize packet capturing handling
  *
- * Cancels pthread, close server socket, removes server socket address.
+ * Unregister the IPC action for communication with target (primary) process.
  *
  * @return
  *    0 on success, -1 on error
@@ -109,7 +84,7 @@ rte_pdump_uninit(void);
  */
 
 int
-rte_pdump_enable(uint8_t port, uint16_t queue, uint32_t flags,
+rte_pdump_enable(uint16_t port, uint16_t queue, uint32_t flags,
 		struct rte_ring *ring,
 		struct rte_mempool *mp,
 		void *filter);
@@ -132,7 +107,7 @@ rte_pdump_enable(uint8_t port, uint16_t queue, uint32_t flags,
  */
 
 int
-rte_pdump_disable(uint8_t port, uint16_t queue, uint32_t flags);
+rte_pdump_disable(uint16_t port, uint16_t queue, uint32_t flags);
 
 /**
  * Enables packet capturing on given device id and queue.
@@ -188,6 +163,7 @@ rte_pdump_disable_by_deviceid(char *device_id, uint16_t queue,
 				uint32_t flags);
 
 /**
+ * @deprecated
  * Allows applications to set server and client socket paths.
  * If specified path is null default path will be selected, i.e.
  *"/var/run/" for root user and "$HOME" for non root user.
@@ -197,7 +173,7 @@ rte_pdump_disable_by_deviceid(char *device_id, uint16_t queue,
  *
  * @param path
  * directory path for server or client socket.
- * @type
+ * @param type
  * specifies RTE_PDUMP_SOCKET_SERVER if socket path is for server.
  * (or)
  * specifies RTE_PDUMP_SOCKET_CLIENT if socket path is for client.
@@ -206,7 +182,7 @@ rte_pdump_disable_by_deviceid(char *device_id, uint16_t queue,
  * 0 on success, -EINVAL on error
  *
  */
-int
+__rte_deprecated int
 rte_pdump_set_socket_dir(const char *path, enum rte_pdump_socktype type);
 
 #ifdef __cplusplus

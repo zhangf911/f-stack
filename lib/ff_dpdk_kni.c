@@ -26,9 +26,11 @@
 
 #include <stdlib.h>
 #include <arpa/inet.h>
+#include <netinet/icmp6.h>
 
 #include <rte_config.h>
 #include <rte_ether.h>
+#include <rte_bus_pci.h>
 #include <rte_ethdev.h>
 #include <rte_kni.h>
 #include <rte_malloc.h>
@@ -39,8 +41,6 @@
 
 #include "ff_dpdk_kni.h"
 #include "ff_config.h"
-
-#define KNI_QUEUE_SIZE 8192
 
 /* Callback for request of changing MTU */
 /* Total octets in ethernet header */
@@ -125,17 +125,17 @@ kni_set_bitmap(const char *p, unsigned char *port_bitmap)
 
 /* Currently we don't support change mtu. */
 static int
-kni_change_mtu(uint8_t port_id, unsigned new_mtu)
+kni_change_mtu(uint16_t port_id, unsigned new_mtu)
 {
     return 0;
 }
 
 static int
-kni_config_network_interface(uint8_t port_id, uint8_t if_up)
+kni_config_network_interface(uint16_t port_id, uint8_t if_up)
 {
     int ret = 0;
 
-    if (port_id >= rte_eth_dev_count() || port_id >= RTE_MAX_ETHPORTS) {
+    if (!rte_eth_dev_is_valid_port(port_id)) {
         printf("Invalid port id %d\n", port_id);
         return -EINVAL;
     }
@@ -166,13 +166,43 @@ kni_config_network_interface(uint8_t port_id, uint8_t if_up)
     return ret;
 }
 
+static void
+print_ethaddr(const char *name, struct ether_addr *mac_addr)
+{
+    char buf[ETHER_ADDR_FMT_SIZE];
+    ether_format_addr(buf, ETHER_ADDR_FMT_SIZE, mac_addr);
+    printf("\t%s%s\n", name, buf);
+}
+
+
+/* Callback for request of configuring mac address */
 static int
-kni_process_tx(uint8_t port_id, uint16_t queue_id,
+kni_config_mac_address(uint16_t port_id, uint8_t mac_addr[])
+{
+    int ret = 0;
+
+    if (!rte_eth_dev_is_valid_port(port_id)) {
+        printf("Invalid port id %d\n", port_id);
+        return -EINVAL;
+    }
+
+    print_ethaddr("Address:", (struct ether_addr *)mac_addr);
+
+    ret = rte_eth_dev_default_mac_addr_set(port_id,
+                       (struct ether_addr *)mac_addr);
+    if (ret < 0)
+        printf("Failed to config mac_addr for port %d\n", port_id);
+
+    return ret;
+}
+
+static int
+kni_process_tx(uint16_t port_id, uint16_t queue_id,
     struct rte_mbuf **pkts_burst, unsigned count)
 {
     /* read packet from kni ring(phy port) and transmit to kni */
     uint16_t nb_tx, nb_kni_tx;
-    nb_tx = rte_ring_dequeue_burst(kni_rp[port_id], (void **)pkts_burst, count);
+    nb_tx = rte_ring_dequeue_burst(kni_rp[port_id], (void **)pkts_burst, count, NULL);
 
     /* NB.
      * if nb_tx is 0,it must call rte_kni_tx_burst
@@ -194,7 +224,7 @@ kni_process_tx(uint8_t port_id, uint16_t queue_id,
 }
 
 static int
-kni_process_rx(uint8_t port_id, uint16_t queue_id,
+kni_process_rx(uint16_t port_id, uint16_t queue_id,
     struct rte_mbuf **pkts_burst, unsigned count)
 {
     uint16_t nb_kni_rx, nb_rx;
@@ -250,34 +280,144 @@ protocol_filter_udp(const void* data,uint16_t len)
     return protocol_filter_l4(hdr->dst_port, udp_port_bitmap);
 }
 
-static enum FilterReturn
-protocol_filter_ip(const void *data, uint16_t len)
+#ifdef INET6
+/*
+ * https://www.iana.org/assignments/ipv6-parameters/ipv6-parameters.xhtml
+ */
+#ifndef IPPROTO_HIP
+#define IPPROTO_HIP 139
+#endif
+
+#ifndef IPPROTO_SHIM6
+#define IPPROTO_SHIM6   140
+#endif
+
+#ifndef IPPROTO_MH
+#define IPPROTO_MH   135
+#endif
+static int
+get_ipv6_hdr_len(uint8_t *proto, void *data, uint16_t len)
 {
-    if(len < sizeof(struct ipv4_hdr))
+    int ext_hdr_len = 0;
+
+    switch (*proto) {
+        case IPPROTO_HOPOPTS:   case IPPROTO_ROUTING:   case IPPROTO_DSTOPTS:
+        case IPPROTO_MH:        case IPPROTO_HIP:       case IPPROTO_SHIM6:
+            ext_hdr_len = *((uint8_t *)data + 1) + 1;
+            break;
+        case IPPROTO_FRAGMENT:
+            ext_hdr_len = 8;
+            break;
+        case IPPROTO_AH:
+            ext_hdr_len = (*((uint8_t *)data + 1) + 2) * 4;
+            break;
+        case IPPROTO_NONE:
+#ifdef FF_IPSEC
+        case IPPROTO_ESP:
+            //proto = *((uint8_t *)data + len - 1 - 4);
+            //ext_hdr_len = len;
+#endif
+        default:
+            return ext_hdr_len;
+    }
+
+    if (ext_hdr_len >= len) {
+        return len;
+    }
+
+    *proto = *((uint8_t *)data);
+    ext_hdr_len += get_ipv6_hdr_len(proto, data + ext_hdr_len, len - ext_hdr_len);
+
+    return ext_hdr_len;
+}
+
+static enum FilterReturn
+protocol_filter_icmp6(void *data, uint16_t len)
+{
+    if (len < sizeof(struct icmp6_hdr))
         return FILTER_UNKNOWN;
 
-    const struct ipv4_hdr *hdr;
-    hdr = (const struct ipv4_hdr *)data;
+    const struct icmp6_hdr *hdr;
+    hdr = (const struct icmp6_hdr *)data;
 
-    void *next = (void *)data + sizeof(struct ipv4_hdr);
-    uint16_t next_len = len - sizeof(struct ipv4_hdr);
+    if (hdr->icmp6_type >= ND_ROUTER_SOLICIT && hdr->icmp6_type <= ND_REDIRECT)
+        return FILTER_NDP;
 
-    switch (hdr->next_proto_id) {
+    return FILTER_UNKNOWN;
+}
+#endif
+
+static enum FilterReturn
+protocol_filter_ip(const void *data, uint16_t len, uint16_t eth_frame_type)
+{
+    uint8_t proto;
+    int hdr_len;
+    void *next;
+    uint16_t next_len;
+
+    if (eth_frame_type == ETHER_TYPE_IPv4) {
+        if(len < sizeof(struct ipv4_hdr))
+            return FILTER_UNKNOWN;
+
+        const struct ipv4_hdr *hdr = (struct ipv4_hdr *)data;
+        hdr_len = (hdr->version_ihl & 0x0f) << 2;
+        if (len < hdr_len)
+            return FILTER_UNKNOWN;
+
+        proto = hdr->next_proto_id;
+#ifdef INET6
+    } else if(eth_frame_type == ETHER_TYPE_IPv6) {
+        if(len < sizeof(struct ipv6_hdr))
+            return FILTER_UNKNOWN;
+
+        hdr_len = sizeof(struct ipv6_hdr);
+        proto = ((struct ipv6_hdr *)data)->proto;
+        hdr_len += get_ipv6_hdr_len(&proto, (void *)data + hdr_len, len - hdr_len);
+
+        if (len < hdr_len)
+            return FILTER_UNKNOWN;
+#endif
+    } else {
+        return FILTER_UNKNOWN;
+    }
+
+    next = (void *)data + hdr_len;
+    next_len = len - hdr_len;
+
+    switch (proto) {
         case IPPROTO_TCP:
+#ifdef FF_KNI
+            if (!enable_kni)
+                break;
+#else
+            break;
+#endif
             return protocol_filter_tcp(next, next_len);
         case IPPROTO_UDP:
+#ifdef FF_KNI
+            if (!enable_kni)
+                break;
+#else
+            break;
+#endif
             return protocol_filter_udp(next, next_len);
         case IPPROTO_IPIP:
-            return protocol_filter_ip(next, next_len);
+            return protocol_filter_ip(next, next_len, ETHER_TYPE_IPv4);
+#ifdef INET6
+        case IPPROTO_IPV6:
+            return protocol_filter_ip(next, next_len, ETHER_TYPE_IPv6);
+        case IPPROTO_ICMPV6:
+            return protocol_filter_icmp6(next, next_len);
+#endif
     }
 
     return FILTER_UNKNOWN;
 }
 
 enum FilterReturn
-ff_kni_proto_filter(const void *data, uint16_t len)
+ff_kni_proto_filter(const void *data, uint16_t len, uint16_t eth_frame_type)
 {
-    return protocol_filter_ip(data, len);
+    return protocol_filter_ip(data, len, eth_frame_type);
 }
 
 void
@@ -329,13 +469,15 @@ ff_kni_init(uint16_t nb_ports, const char *tcp_ports, const char *udp_ports)
 }
 
 void
-ff_kni_alloc(uint8_t port_id, unsigned socket_id,
-    struct rte_mempool *mbuf_pool)
+ff_kni_alloc(uint16_t port_id, unsigned socket_id,
+    struct rte_mempool *mbuf_pool, unsigned ring_queue_size)
 {
     if (rte_eal_process_type() == RTE_PROC_PRIMARY) {
         struct rte_kni_conf conf;
         struct rte_kni_ops ops;
         struct rte_eth_dev_info dev_info;
+        const struct rte_pci_device *pci_dev;
+        const struct rte_bus *bus = NULL;
 
         kni_stat[port_id] = (struct kni_interface_stats*)rte_zmalloc(
             "kni:stat_lcore",
@@ -357,13 +499,24 @@ ff_kni_alloc(uint8_t port_id, unsigned socket_id,
 
         memset(&dev_info, 0, sizeof(dev_info));
         rte_eth_dev_info_get(port_id, &dev_info);
-        conf.addr = dev_info.pci_dev->addr;
-        conf.id = dev_info.pci_dev->id;
+
+        if (dev_info.device)
+            bus = rte_bus_find_by_device(dev_info.device);
+        if (bus && !strcmp(bus->name, "pci")) {
+            pci_dev = RTE_DEV_TO_PCI(dev_info.device);
+            conf.addr = pci_dev->addr;
+            conf.id = pci_dev->id;
+        }
+        
+        /* Get the interface default mac address */
+        rte_eth_macaddr_get(port_id,
+                (struct ether_addr *)&conf.mac_addr);
 
         memset(&ops, 0, sizeof(ops));
         ops.port_id = port_id;
         ops.change_mtu = kni_change_mtu;
         ops.config_network_if = kni_config_network_interface;
+        ops.config_mac_address = kni_config_mac_address;
 
         kni_stat[port_id]->kni = rte_kni_alloc(mbuf_pool, &conf, &ops);
         if (kni_stat[port_id]->kni == NULL)
@@ -381,8 +534,11 @@ ff_kni_alloc(uint8_t port_id, unsigned socket_id,
     snprintf((char*)ring_name, RTE_KNI_NAMESIZE, "kni_ring_%u", port_id);
 
     if (rte_eal_process_type() == RTE_PROC_PRIMARY) {
-        kni_rp[port_id] = rte_ring_create(ring_name, KNI_QUEUE_SIZE, 
+        kni_rp[port_id] = rte_ring_create(ring_name, ring_queue_size, 
             socket_id, RING_F_SC_DEQ);
+
+        if (rte_ring_lookup(ring_name) != kni_rp[port_id])
+            rte_panic("lookup kni ring failed!\n");
     } else {
         kni_rp[port_id] = rte_ring_lookup(ring_name);
     }
@@ -390,16 +546,12 @@ ff_kni_alloc(uint8_t port_id, unsigned socket_id,
     if (kni_rp[port_id] == NULL)
         rte_panic("create kni ring failed!\n");
 
-    if (rte_ring_lookup(ring_name) != kni_rp[port_id])
-        rte_panic("lookup kni ring failed!\n");
-
     printf("create kni ring success, %u ring entries are now free!\n",
         rte_ring_free_count(kni_rp[port_id]));
 }
 
-
 void
-ff_kni_process(uint8_t port_id, uint16_t queue_id,
+ff_kni_process(uint16_t port_id, uint16_t queue_id,
     struct rte_mbuf **pkts_burst, unsigned count)
 {
     kni_process_tx(port_id, queue_id, pkts_burst, count);
@@ -408,7 +560,7 @@ ff_kni_process(uint8_t port_id, uint16_t queue_id,
 
 /* enqueue the packet, and own it */
 int
-ff_kni_enqueue(uint8_t port_id, struct rte_mbuf *pkt)
+ff_kni_enqueue(uint16_t port_id, struct rte_mbuf *pkt)
 {
     int ret = rte_ring_enqueue(kni_rp[port_id], pkt);
     if (ret < 0)

@@ -1,36 +1,8 @@
+# SPDX-License-Identifier: BSD-3-Clause
 # Copyright 2014 6WIND S.A.
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions
-# are met:
-#
-# - Redistributions of source code must retain the above copyright
-#   notice, this list of conditions and the following disclaimer.
-#
-# - Redistributions in binary form must reproduce the above copyright
-#   notice, this list of conditions and the following disclaimer in
-#   the documentation and/or other materials provided with the
-#   distribution.
-#
-# - Neither the name of 6WIND S.A. nor the names of its
-#   contributors may be used to endorse or promote products derived
-#   from this software without specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
-# FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
-# COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
-# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
-# HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
-# STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
-# OF THE POSSIBILITY OF SUCH DAMAGE.
 
 Name: dpdk
-Version: 16.07.2
+Version: 18.11.5
 Release: 1
 Packager: packaging@6wind.com
 URL: http://dpdk.org
@@ -40,12 +12,18 @@ Summary: Data Plane Development Kit core
 Group: System Environment/Libraries
 License: BSD and LGPLv2 and GPLv2
 
-ExclusiveArch: i686, x86_64
+ExclusiveArch: i686 x86_64 aarch64
+%ifarch aarch64
+%global machine armv8a
+%global target arm64-%{machine}-linuxapp-gcc
+%global config arm64-%{machine}-linuxapp-gcc
+%else
 %global machine default
 %global target %{_arch}-%{machine}-linuxapp-gcc
 %global config %{_arch}-native-linuxapp-gcc
+%endif
 
-BuildRequires: kernel-devel, kernel-headers, libpcap-devel, xen-devel
+BuildRequires: kernel-devel, kernel-headers, libpcap-devel
 BuildRequires: doxygen, python-sphinx, inkscape
 BuildRequires: texlive-collection-latexextra
 
@@ -81,7 +59,6 @@ sed -ri 's,(RTE_BUILD_SHARED_LIB=).*,\1y,' %{target}/.config
 sed -ri 's,(RTE_NEXT_ABI=).*,\1n,'         %{target}/.config
 sed -ri 's,(LIBRTE_VHOST=).*,\1y,'         %{target}/.config
 sed -ri 's,(LIBRTE_PMD_PCAP=).*,\1y,'      %{target}/.config
-sed -ri 's,(LIBRTE_PMD_XENVIRT=).*,\1y,'   %{target}/.config
 make O=%{target} %{?_smp_mflags}
 make O=%{target} doc
 
@@ -94,7 +71,7 @@ make install O=%{target} DESTDIR=%{buildroot} \
 
 %files
 %dir %{_datadir}/dpdk
-%{_datadir}/dpdk/tools
+%{_datadir}/dpdk/usertools
 /lib/modules/%(uname -r)/extra/*
 %{_sbindir}/*
 %{_bindir}/*
@@ -103,7 +80,7 @@ make install O=%{target} DESTDIR=%{buildroot} \
 %files devel
 %{_includedir}/dpdk
 %{_datadir}/dpdk/mk
-%{_datadir}/dpdk/scripts
+%{_datadir}/dpdk/buildtools
 %{_datadir}/dpdk/%{target}
 %{_datadir}/dpdk/examples
 

@@ -1,34 +1,5 @@
-/*-
- *   BSD LICENSE
- *
- *   Copyright(c) 2010-2015 Intel Corporation. All rights reserved.
- *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright(c) 2010-2016 Intel Corporation
  */
 
 #include <sys/queue.h>
@@ -40,15 +11,14 @@
 #include <rte_common.h>
 #include <rte_interrupts.h>
 #include <rte_byteorder.h>
-#include <rte_log.h>
 #include <rte_debug.h>
 #include <rte_pci.h>
+#include <rte_bus_pci.h>
 #include <rte_ether.h>
-#include <rte_ethdev.h>
+#include <rte_ethdev_driver.h>
+#include <rte_ethdev_pci.h>
 #include <rte_memory.h>
-#include <rte_memzone.h>
 #include <rte_eal.h>
-#include <rte_atomic.h>
 #include <rte_malloc.h>
 #include <rte_dev.h>
 
@@ -71,7 +41,7 @@ static void eth_em_allmulticast_enable(struct rte_eth_dev *dev);
 static void eth_em_allmulticast_disable(struct rte_eth_dev *dev);
 static int eth_em_link_update(struct rte_eth_dev *dev,
 				int wait_to_complete);
-static void eth_em_stats_get(struct rte_eth_dev *dev,
+static int eth_em_stats_get(struct rte_eth_dev *dev,
 				struct rte_eth_stats *rte_stats);
 static void eth_em_stats_reset(struct rte_eth_dev *dev);
 static void eth_em_infos_get(struct rte_eth_dev *dev,
@@ -83,9 +53,9 @@ static int eth_em_flow_ctrl_set(struct rte_eth_dev *dev,
 static int eth_em_interrupt_setup(struct rte_eth_dev *dev);
 static int eth_em_rxq_interrupt_setup(struct rte_eth_dev *dev);
 static int eth_em_interrupt_get_status(struct rte_eth_dev *dev);
-static int eth_em_interrupt_action(struct rte_eth_dev *dev);
-static void eth_em_interrupt_handler(struct rte_intr_handle *handle,
-							void *param);
+static int eth_em_interrupt_action(struct rte_eth_dev *dev,
+				   struct rte_intr_handle *handle);
+static void eth_em_interrupt_handler(void *param);
 
 static int em_hw_init(struct e1000_hw *hw);
 static int em_hardware_init(struct e1000_hw *hw);
@@ -98,7 +68,7 @@ static int eth_em_mtu_set(struct rte_eth_dev *dev, uint16_t mtu);
 
 static int eth_em_vlan_filter_set(struct rte_eth_dev *dev,
 		uint16_t vlan_id, int on);
-static void eth_em_vlan_offload_set(struct rte_eth_dev *dev, int mask);
+static int eth_em_vlan_offload_set(struct rte_eth_dev *dev, int mask);
 static void em_vlan_hw_filter_enable(struct rte_eth_dev *dev);
 static void em_vlan_hw_filter_disable(struct rte_eth_dev *dev);
 static void em_vlan_hw_strip_enable(struct rte_eth_dev *dev);
@@ -119,9 +89,11 @@ static int eth_em_led_on(struct rte_eth_dev *dev);
 static int eth_em_led_off(struct rte_eth_dev *dev);
 
 static int em_get_rx_buffer_size(struct e1000_hw *hw);
-static void eth_em_rar_set(struct rte_eth_dev *dev, struct ether_addr *mac_addr,
-		uint32_t index, uint32_t pool);
+static int eth_em_rar_set(struct rte_eth_dev *dev, struct ether_addr *mac_addr,
+			  uint32_t index, uint32_t pool);
 static void eth_em_rar_clear(struct rte_eth_dev *dev, uint32_t index);
+static int eth_em_default_mac_addr_set(struct rte_eth_dev *dev,
+					 struct ether_addr *addr);
 
 static int eth_em_set_mc_addr_list(struct rte_eth_dev *dev,
 				   struct ether_addr *mc_addr_set,
@@ -160,6 +132,7 @@ static const struct rte_pci_id pci_id_em_map[] = {
 	{ RTE_PCI_DEVICE(E1000_INTEL_VENDOR_ID, E1000_DEV_ID_82574L) },
 	{ RTE_PCI_DEVICE(E1000_INTEL_VENDOR_ID, E1000_DEV_ID_82574LA) },
 	{ RTE_PCI_DEVICE(E1000_INTEL_VENDOR_ID, E1000_DEV_ID_82583V) },
+	{ RTE_PCI_DEVICE(E1000_INTEL_VENDOR_ID, E1000_DEV_ID_PCH2_LV_LM) },
 	{ RTE_PCI_DEVICE(E1000_INTEL_VENDOR_ID, E1000_DEV_ID_PCH_LPT_I217_LM) },
 	{ RTE_PCI_DEVICE(E1000_INTEL_VENDOR_ID, E1000_DEV_ID_PCH_LPT_I217_V) },
 	{ RTE_PCI_DEVICE(E1000_INTEL_VENDOR_ID, E1000_DEV_ID_PCH_LPTLP_I218_LM) },
@@ -168,6 +141,19 @@ static const struct rte_pci_id pci_id_em_map[] = {
 	{ RTE_PCI_DEVICE(E1000_INTEL_VENDOR_ID, E1000_DEV_ID_PCH_I218_V2) },
 	{ RTE_PCI_DEVICE(E1000_INTEL_VENDOR_ID, E1000_DEV_ID_PCH_I218_LM3) },
 	{ RTE_PCI_DEVICE(E1000_INTEL_VENDOR_ID, E1000_DEV_ID_PCH_I218_V3) },
+	{ RTE_PCI_DEVICE(E1000_INTEL_VENDOR_ID, E1000_DEV_ID_PCH_SPT_I219_LM) },
+	{ RTE_PCI_DEVICE(E1000_INTEL_VENDOR_ID, E1000_DEV_ID_PCH_SPT_I219_V) },
+	{ RTE_PCI_DEVICE(E1000_INTEL_VENDOR_ID, E1000_DEV_ID_PCH_SPT_I219_LM2) },
+	{ RTE_PCI_DEVICE(E1000_INTEL_VENDOR_ID, E1000_DEV_ID_PCH_SPT_I219_V2) },
+	{ RTE_PCI_DEVICE(E1000_INTEL_VENDOR_ID, E1000_DEV_ID_PCH_LBG_I219_LM3) },
+	{ RTE_PCI_DEVICE(E1000_INTEL_VENDOR_ID, E1000_DEV_ID_PCH_SPT_I219_LM4) },
+	{ RTE_PCI_DEVICE(E1000_INTEL_VENDOR_ID, E1000_DEV_ID_PCH_SPT_I219_V4) },
+	{ RTE_PCI_DEVICE(E1000_INTEL_VENDOR_ID, E1000_DEV_ID_PCH_SPT_I219_LM5) },
+	{ RTE_PCI_DEVICE(E1000_INTEL_VENDOR_ID, E1000_DEV_ID_PCH_SPT_I219_V5) },
+	{ RTE_PCI_DEVICE(E1000_INTEL_VENDOR_ID, E1000_DEV_ID_PCH_CNP_I219_LM6) },
+	{ RTE_PCI_DEVICE(E1000_INTEL_VENDOR_ID, E1000_DEV_ID_PCH_CNP_I219_V6) },
+	{ RTE_PCI_DEVICE(E1000_INTEL_VENDOR_ID, E1000_DEV_ID_PCH_CNP_I219_LM7) },
+	{ RTE_PCI_DEVICE(E1000_INTEL_VENDOR_ID, E1000_DEV_ID_PCH_CNP_I219_V7) },
 	{ .vendor_id = 0, /* sentinel */ },
 };
 
@@ -191,6 +177,8 @@ static const struct eth_dev_ops eth_em_ops = {
 	.rx_queue_release     = eth_em_rx_queue_release,
 	.rx_queue_count       = eth_em_rx_queue_count,
 	.rx_descriptor_done   = eth_em_rx_descriptor_done,
+	.rx_descriptor_status = eth_em_rx_descriptor_status,
+	.tx_descriptor_status = eth_em_tx_descriptor_status,
 	.tx_queue_setup       = eth_em_tx_queue_setup,
 	.tx_queue_release     = eth_em_tx_queue_release,
 	.rx_queue_intr_enable = eth_em_rx_queue_intr_enable,
@@ -199,6 +187,7 @@ static const struct eth_dev_ops eth_em_ops = {
 	.dev_led_off          = eth_em_led_off,
 	.flow_ctrl_get        = eth_em_flow_ctrl_get,
 	.flow_ctrl_set        = eth_em_flow_ctrl_set,
+	.mac_addr_set         = eth_em_default_mac_addr_set,
 	.mac_addr_add         = eth_em_rar_set,
 	.mac_addr_remove      = eth_em_rar_clear,
 	.set_mc_addr_list     = eth_em_set_mc_addr_list,
@@ -206,57 +195,6 @@ static const struct eth_dev_ops eth_em_ops = {
 	.txq_info_get         = em_txq_info_get,
 };
 
-/**
- * Atomically reads the link status information from global
- * structure rte_eth_dev.
- *
- * @param dev
- *   - Pointer to the structure rte_eth_dev to read from.
- *   - Pointer to the buffer to be saved with the link status.
- *
- * @return
- *   - On success, zero.
- *   - On failure, negative value.
- */
-static inline int
-rte_em_dev_atomic_read_link_status(struct rte_eth_dev *dev,
-				struct rte_eth_link *link)
-{
-	struct rte_eth_link *dst = link;
-	struct rte_eth_link *src = &(dev->data->dev_link);
-
-	if (rte_atomic64_cmpset((uint64_t *)dst, *(uint64_t *)dst,
-					*(uint64_t *)src) == 0)
-		return -1;
-
-	return 0;
-}
-
-/**
- * Atomically writes the link status information into global
- * structure rte_eth_dev.
- *
- * @param dev
- *   - Pointer to the structure rte_eth_dev to read from.
- *   - Pointer to the buffer to be saved with the link status.
- *
- * @return
- *   - On success, zero.
- *   - On failure, negative value.
- */
-static inline int
-rte_em_dev_atomic_write_link_status(struct rte_eth_dev *dev,
-				struct rte_eth_link *link)
-{
-	struct rte_eth_link *dst = &(dev->data->dev_link);
-	struct rte_eth_link *src = link;
-
-	if (rte_atomic64_cmpset((uint64_t *)dst, *(uint64_t *)dst,
-					*(uint64_t *)src) == 0)
-		return -1;
-
-	return 0;
-}
 
 /**
  *  eth_em_dev_is_ich8 - Check for ICH8 device
@@ -270,6 +208,7 @@ eth_em_dev_is_ich8(struct e1000_hw *hw)
 	DEBUGFUNC("eth_em_dev_is_ich8");
 
 	switch (hw->device_id) {
+	case E1000_DEV_ID_PCH2_LV_LM:
 	case E1000_DEV_ID_PCH_LPT_I217_LM:
 	case E1000_DEV_ID_PCH_LPT_I217_V:
 	case E1000_DEV_ID_PCH_LPTLP_I218_LM:
@@ -278,6 +217,19 @@ eth_em_dev_is_ich8(struct e1000_hw *hw)
 	case E1000_DEV_ID_PCH_I218_LM2:
 	case E1000_DEV_ID_PCH_I218_V3:
 	case E1000_DEV_ID_PCH_I218_LM3:
+	case E1000_DEV_ID_PCH_SPT_I219_LM:
+	case E1000_DEV_ID_PCH_SPT_I219_V:
+	case E1000_DEV_ID_PCH_SPT_I219_LM2:
+	case E1000_DEV_ID_PCH_SPT_I219_V2:
+	case E1000_DEV_ID_PCH_LBG_I219_LM3:
+	case E1000_DEV_ID_PCH_SPT_I219_LM4:
+	case E1000_DEV_ID_PCH_SPT_I219_V4:
+	case E1000_DEV_ID_PCH_SPT_I219_LM5:
+	case E1000_DEV_ID_PCH_SPT_I219_V5:
+	case E1000_DEV_ID_PCH_CNP_I219_LM6:
+	case E1000_DEV_ID_PCH_CNP_I219_V6:
+	case E1000_DEV_ID_PCH_CNP_I219_LM7:
+	case E1000_DEV_ID_PCH_CNP_I219_V7:
 		return 1;
 	default:
 		return 0;
@@ -287,7 +239,8 @@ eth_em_dev_is_ich8(struct e1000_hw *hw)
 static int
 eth_em_dev_init(struct rte_eth_dev *eth_dev)
 {
-	struct rte_pci_device *pci_dev;
+	struct rte_pci_device *pci_dev = RTE_ETH_DEV_TO_PCI(eth_dev);
+	struct rte_intr_handle *intr_handle = &pci_dev->intr_handle;
 	struct e1000_adapter *adapter =
 		E1000_DEV_PRIVATE(eth_dev->data->dev_private);
 	struct e1000_hw *hw =
@@ -295,11 +248,10 @@ eth_em_dev_init(struct rte_eth_dev *eth_dev)
 	struct e1000_vfta * shadow_vfta =
 		E1000_DEV_PRIVATE_TO_VFTA(eth_dev->data->dev_private);
 
-	pci_dev = eth_dev->pci_dev;
-
 	eth_dev->dev_ops = &eth_em_ops;
 	eth_dev->rx_pkt_burst = (eth_rx_burst_t)&eth_em_recv_pkts;
 	eth_dev->tx_pkt_burst = (eth_tx_burst_t)&eth_em_xmit_pkts;
+	eth_dev->tx_pkt_prepare = (eth_tx_prep_t)&eth_em_prep_pkts;
 
 	/* for secondary processes, we don't initialise any further as primary
 	 * has already done this work. Only check we don't need a different
@@ -351,8 +303,8 @@ eth_em_dev_init(struct rte_eth_dev *eth_dev)
 		     eth_dev->data->port_id, pci_dev->id.vendor_id,
 		     pci_dev->id.device_id);
 
-	rte_intr_callback_register(&(pci_dev->intr_handle),
-		eth_em_interrupt_handler, (void *)eth_dev);
+	rte_intr_callback_register(intr_handle,
+				   eth_em_interrupt_handler, eth_dev);
 
 	return 0;
 }
@@ -360,16 +312,15 @@ eth_em_dev_init(struct rte_eth_dev *eth_dev)
 static int
 eth_em_dev_uninit(struct rte_eth_dev *eth_dev)
 {
-	struct rte_pci_device *pci_dev;
+	struct rte_pci_device *pci_dev = RTE_ETH_DEV_TO_PCI(eth_dev);
 	struct e1000_adapter *adapter =
 		E1000_DEV_PRIVATE(eth_dev->data->dev_private);
+	struct rte_intr_handle *intr_handle = &pci_dev->intr_handle;
 
 	PMD_INIT_FUNC_TRACE();
 
 	if (rte_eal_process_type() != RTE_PROC_PRIMARY)
 		return -EPERM;
-
-	pci_dev = eth_dev->pci_dev;
 
 	if (adapter->stopped == 0)
 		eth_em_close(eth_dev);
@@ -378,35 +329,33 @@ eth_em_dev_uninit(struct rte_eth_dev *eth_dev)
 	eth_dev->rx_pkt_burst = NULL;
 	eth_dev->tx_pkt_burst = NULL;
 
-	rte_free(eth_dev->data->mac_addrs);
-	eth_dev->data->mac_addrs = NULL;
-
 	/* disable uio intr before callback unregister */
-	rte_intr_disable(&(pci_dev->intr_handle));
-	rte_intr_callback_unregister(&(pci_dev->intr_handle),
-		eth_em_interrupt_handler, (void *)eth_dev);
+	rte_intr_disable(intr_handle);
+	rte_intr_callback_unregister(intr_handle,
+				     eth_em_interrupt_handler, eth_dev);
 
 	return 0;
 }
 
-static struct eth_driver rte_em_pmd = {
-	.pci_drv = {
-		.name = "rte_em_pmd",
-		.id_table = pci_id_em_map,
-		.drv_flags = RTE_PCI_DRV_NEED_MAPPING | RTE_PCI_DRV_INTR_LSC |
-			RTE_PCI_DRV_DETACHABLE,
-	},
-	.eth_dev_init = eth_em_dev_init,
-	.eth_dev_uninit = eth_em_dev_uninit,
-	.dev_private_size = sizeof(struct e1000_adapter),
-};
-
-static int
-rte_em_pmd_init(const char *name __rte_unused, const char *params __rte_unused)
+static int eth_em_pci_probe(struct rte_pci_driver *pci_drv __rte_unused,
+	struct rte_pci_device *pci_dev)
 {
-	rte_eth_driver_register(&rte_em_pmd);
-	return 0;
+	return rte_eth_dev_pci_generic_probe(pci_dev,
+		sizeof(struct e1000_adapter), eth_em_dev_init);
 }
+
+static int eth_em_pci_remove(struct rte_pci_device *pci_dev)
+{
+	return rte_eth_dev_pci_generic_remove(pci_dev, eth_em_dev_uninit);
+}
+
+static struct rte_pci_driver rte_em_pmd = {
+	.id_table = pci_id_em_map,
+	.drv_flags = RTE_PCI_DRV_NEED_MAPPING | RTE_PCI_DRV_INTR_LSC |
+		     RTE_PCI_DRV_IOVA_AS_VA,
+	.probe = eth_em_pci_probe,
+	.remove = eth_em_pci_remove,
+};
 
 static int
 em_hw_init(struct e1000_hw *hw)
@@ -501,6 +450,7 @@ eth_em_configure(struct rte_eth_dev *dev)
 
 	PMD_INIT_FUNC_TRACE();
 	intr->flags |= E1000_FLAG_NEED_LINK_UPDATE;
+
 	PMD_INIT_FUNC_TRACE();
 
 	return 0;
@@ -546,6 +496,8 @@ em_set_pba(struct e1000_hw *hw)
 		case e1000_pchlan:
 		case e1000_pch2lan:
 		case e1000_pch_lpt:
+		case e1000_pch_spt:
+		case e1000_pch_cnp:
 			pba = E1000_PBA_26K;
 			break;
 		default:
@@ -555,6 +507,30 @@ em_set_pba(struct e1000_hw *hw)
 	E1000_WRITE_REG(hw, E1000_PBA, pba);
 }
 
+static void
+eth_em_rxtx_control(struct rte_eth_dev *dev,
+		    bool enable)
+{
+	struct e1000_hw *hw =
+		E1000_DEV_PRIVATE_TO_HW(dev->data->dev_private);
+	uint32_t tctl, rctl;
+
+	tctl = E1000_READ_REG(hw, E1000_TCTL);
+	rctl = E1000_READ_REG(hw, E1000_RCTL);
+	if (enable) {
+		/* enable Tx/Rx */
+		tctl |= E1000_TCTL_EN;
+		rctl |= E1000_RCTL_EN;
+	} else {
+		/* disable Tx/Rx */
+		tctl &= ~E1000_TCTL_EN;
+		rctl &= ~E1000_RCTL_EN;
+	}
+	E1000_WRITE_REG(hw, E1000_TCTL, tctl);
+	E1000_WRITE_REG(hw, E1000_RCTL, rctl);
+	E1000_WRITE_FLUSH(hw);
+}
+
 static int
 eth_em_start(struct rte_eth_dev *dev)
 {
@@ -562,7 +538,8 @@ eth_em_start(struct rte_eth_dev *dev)
 		E1000_DEV_PRIVATE(dev->data->dev_private);
 	struct e1000_hw *hw =
 		E1000_DEV_PRIVATE_TO_HW(dev->data->dev_private);
-	struct rte_intr_handle *intr_handle = &dev->pci_dev->intr_handle;
+	struct rte_pci_device *pci_dev = RTE_ETH_DEV_TO_PCI(dev);
+	struct rte_intr_handle *intr_handle = &pci_dev->intr_handle;
 	int ret, mask;
 	uint32_t intr_vector = 0;
 	uint32_t *speeds;
@@ -615,7 +592,7 @@ eth_em_start(struct rte_eth_dev *dev)
 					dev->data->nb_rx_queues * sizeof(int), 0);
 		if (intr_handle->intr_vec == NULL) {
 			PMD_INIT_LOG(ERR, "Failed to allocate %d rx_queues"
-						" intr_vec\n", dev->data->nb_rx_queues);
+						" intr_vec", dev->data->nb_rx_queues);
 			return -ENOMEM;
 		}
 
@@ -636,7 +613,12 @@ eth_em_start(struct rte_eth_dev *dev)
 
 	mask = ETH_VLAN_STRIP_MASK | ETH_VLAN_FILTER_MASK | \
 			ETH_VLAN_EXTEND_MASK;
-	eth_em_vlan_offload_set(dev, mask);
+	ret = eth_em_vlan_offload_set(dev, mask);
+	if (ret) {
+		PMD_INIT_LOG(ERR, "Unable to update vlan offload");
+		em_dev_clear_queues(dev);
+		return ret;
+	}
 
 	/* Set Interrupt Throttling Rate to maximum allowed value. */
 	E1000_WRITE_REG(hw, E1000_ITR, UINT16_MAX);
@@ -645,6 +627,7 @@ eth_em_start(struct rte_eth_dev *dev)
 	speeds = &dev->data->dev_conf.link_speeds;
 	if (*speeds == ETH_LINK_SPEED_AUTONEG) {
 		hw->phy.autoneg_advertised = E1000_ALL_SPEED_DUPLEX;
+		hw->mac.autoneg = 1;
 	} else {
 		num_speeds = 0;
 		autoneg = (*speeds & ETH_LINK_SPEED_FIXED) == 0;
@@ -680,6 +663,17 @@ eth_em_start(struct rte_eth_dev *dev)
 		}
 		if (num_speeds == 0 || (!autoneg && (num_speeds > 1)))
 			goto error_invalid_config;
+
+		/* Set/reset the mac.autoneg based on the link speed,
+		 * fixed or not
+		 */
+		if (!autoneg) {
+			hw->mac.autoneg = 0;
+			hw->mac.forced_speed_duplex =
+					hw->phy.autoneg_advertised;
+		} else {
+			hw->mac.autoneg = 1;
+		}
 	}
 
 	e1000_setup_link(hw);
@@ -700,7 +694,7 @@ eth_em_start(struct rte_eth_dev *dev)
 						(void *)dev);
 		if (dev->data->dev_conf.intr_conf.lsc != 0)
 			PMD_INIT_LOG(INFO, "lsc won't enable because of"
-				     " no intr multiplex\n");
+				     " no intr multiplexn");
 	}
 	/* check if rxq interrupt is enabled */
 	if (dev->data->dev_conf.intr_conf.rxq != 0)
@@ -709,6 +703,9 @@ eth_em_start(struct rte_eth_dev *dev)
 	rte_intr_enable(intr_handle);
 
 	adapter->stopped = 0;
+
+	eth_em_rxtx_control(dev, true);
+	eth_em_link_update(dev, 0);
 
 	PMD_INIT_LOG(DEBUG, "<<");
 
@@ -732,8 +729,10 @@ eth_em_stop(struct rte_eth_dev *dev)
 {
 	struct rte_eth_link link;
 	struct e1000_hw *hw = E1000_DEV_PRIVATE_TO_HW(dev->data->dev_private);
-	struct rte_intr_handle *intr_handle = &dev->pci_dev->intr_handle;
+	struct rte_pci_device *pci_dev = RTE_ETH_DEV_TO_PCI(dev);
+	struct rte_intr_handle *intr_handle = &pci_dev->intr_handle;
 
+	eth_em_rxtx_control(dev, false);
 	em_rxq_intr_disable(hw);
 	em_lsc_intr_disable(hw);
 
@@ -748,7 +747,7 @@ eth_em_stop(struct rte_eth_dev *dev)
 
 	/* clear the recorded link status */
 	memset(&link, 0, sizeof(link));
-	rte_em_dev_atomic_write_link_status(dev, &link);
+	rte_eth_linkstatus_set(dev, &link);
 
 	if (!rte_intr_allow_others(intr_handle))
 		/* resume to the default handler */
@@ -847,7 +846,9 @@ em_hardware_init(struct e1000_hw *hw)
 		hw->fc.low_water = 0x5048;
 		hw->fc.pause_time = 0x0650;
 		hw->fc.refresh_time = 0x0400;
-	} else if (hw->mac.type == e1000_pch_lpt) {
+	} else if (hw->mac.type == e1000_pch_lpt ||
+		   hw->mac.type == e1000_pch_spt ||
+		   hw->mac.type == e1000_pch_cnp) {
 		hw->fc.requested_mode = e1000_fc_full;
 	}
 
@@ -859,7 +860,7 @@ em_hardware_init(struct e1000_hw *hw)
 }
 
 /* This function is based on em_update_stats_counters() in e1000/if_em.c */
-static void
+static int
 eth_em_stats_get(struct rte_eth_dev *dev, struct rte_eth_stats *rte_stats)
 {
 	struct e1000_hw *hw = E1000_DEV_PRIVATE_TO_HW(dev->data->dev_private);
@@ -959,7 +960,7 @@ eth_em_stats_get(struct rte_eth_dev *dev, struct rte_eth_stats *rte_stats)
 	}
 
 	if (rte_stats == NULL)
-		return;
+		return -EINVAL;
 
 	/* Rx Errors */
 	rte_stats->imissed = stats->mpc;
@@ -974,6 +975,7 @@ eth_em_stats_get(struct rte_eth_dev *dev, struct rte_eth_stats *rte_stats)
 	rte_stats->opackets = stats->gptc;
 	rte_stats->ibytes   = stats->gorc;
 	rte_stats->obytes   = stats->gotc;
+	return 0;
 }
 
 static void
@@ -993,9 +995,11 @@ static int
 eth_em_rx_queue_intr_enable(struct rte_eth_dev *dev, __rte_unused uint16_t queue_id)
 {
 	struct e1000_hw *hw = E1000_DEV_PRIVATE_TO_HW(dev->data->dev_private);
+	struct rte_pci_device *pci_dev = RTE_ETH_DEV_TO_PCI(dev);
+	struct rte_intr_handle *intr_handle = &pci_dev->intr_handle;
 
 	em_rxq_intr_enable(hw);
-	rte_intr_enable(&dev->pci_dev->intr_handle);
+	rte_intr_enable(intr_handle);
 
 	return 0;
 }
@@ -1010,9 +1014,11 @@ eth_em_rx_queue_intr_disable(struct rte_eth_dev *dev, __rte_unused uint16_t queu
 	return 0;
 }
 
-static uint32_t
-em_get_max_pktlen(const struct e1000_hw *hw)
+uint32_t
+em_get_max_pktlen(struct rte_eth_dev *dev)
 {
+	struct e1000_hw *hw = E1000_DEV_PRIVATE_TO_HW(dev->data->dev_private);
+
 	switch (hw->mac.type) {
 	case e1000_82571:
 	case e1000_82572:
@@ -1020,6 +1026,8 @@ em_get_max_pktlen(const struct e1000_hw *hw)
 	case e1000_ich10lan:
 	case e1000_pch2lan:
 	case e1000_pch_lpt:
+	case e1000_pch_spt:
+	case e1000_pch_cnp:
 	case e1000_82574:
 	case e1000_80003es2lan: /* 9K Jumbo Frame size */
 	case e1000_82583:
@@ -1040,7 +1048,7 @@ eth_em_infos_get(struct rte_eth_dev *dev, struct rte_eth_dev_info *dev_info)
 	struct e1000_hw *hw = E1000_DEV_PRIVATE_TO_HW(dev->data->dev_private);
 
 	dev_info->min_rx_bufsize = 256; /* See BSIZE field of RCTL register. */
-	dev_info->max_rx_pktlen = em_get_max_pktlen(hw);
+	dev_info->max_rx_pktlen = em_get_max_pktlen(dev);
 	dev_info->max_mac_addrs = hw->mac.rar_entry_count;
 
 	/*
@@ -1063,6 +1071,13 @@ eth_em_infos_get(struct rte_eth_dev *dev, struct rte_eth_dev_info *dev_info)
 	dev_info->max_rx_queues = 1;
 	dev_info->max_tx_queues = 1;
 
+	dev_info->rx_queue_offload_capa = em_get_rx_queue_offloads_capa(dev);
+	dev_info->rx_offload_capa = em_get_rx_port_offloads_capa(dev) |
+				    dev_info->rx_queue_offload_capa;
+	dev_info->tx_queue_offload_capa = em_get_tx_queue_offloads_capa(dev);
+	dev_info->tx_offload_capa = em_get_tx_port_offloads_capa(dev) |
+				    dev_info->tx_queue_offload_capa;
+
 	dev_info->rx_desc_lim = (struct rte_eth_desc_lim) {
 		.nb_max = E1000_MAX_RING_DESC,
 		.nb_min = E1000_MIN_RING_DESC,
@@ -1073,11 +1088,19 @@ eth_em_infos_get(struct rte_eth_dev *dev, struct rte_eth_dev_info *dev_info)
 		.nb_max = E1000_MAX_RING_DESC,
 		.nb_min = E1000_MIN_RING_DESC,
 		.nb_align = EM_TXD_ALIGN,
+		.nb_seg_max = EM_TX_MAX_SEG,
+		.nb_mtu_seg_max = EM_TX_MAX_MTU_SEG,
 	};
 
 	dev_info->speed_capa = ETH_LINK_SPEED_10M_HD | ETH_LINK_SPEED_10M |
 			ETH_LINK_SPEED_100M_HD | ETH_LINK_SPEED_100M |
 			ETH_LINK_SPEED_1G;
+
+	/* Preferred queue parameters */
+	dev_info->default_rxportconf.nb_queues = 1;
+	dev_info->default_txportconf.nb_queues = 1;
+	dev_info->default_txportconf.ring_size = 256;
+	dev_info->default_rxportconf.ring_size = 256;
 }
 
 /* return 0 means link status changed, -1 means not changed */
@@ -1086,7 +1109,7 @@ eth_em_link_update(struct rte_eth_dev *dev, int wait_to_complete)
 {
 	struct e1000_hw *hw =
 		E1000_DEV_PRIVATE_TO_HW(dev->data->dev_private);
-	struct rte_eth_link link, old;
+	struct rte_eth_link link;
 	int link_check, count;
 
 	link_check = 0;
@@ -1121,8 +1144,6 @@ eth_em_link_update(struct rte_eth_dev *dev, int wait_to_complete)
 		rte_delay_ms(EM_LINK_UPDATE_CHECK_INTERVAL);
 	}
 	memset(&link, 0, sizeof(link));
-	rte_em_dev_atomic_read_link_status(dev, &link);
-	old = link;
 
 	/* Now we check if a transition has happened */
 	if (link_check && (link.link_status == ETH_LINK_DOWN)) {
@@ -1136,19 +1157,13 @@ eth_em_link_update(struct rte_eth_dev *dev, int wait_to_complete)
 		link.link_autoneg = !(dev->data->dev_conf.link_speeds &
 				ETH_LINK_SPEED_FIXED);
 	} else if (!link_check && (link.link_status == ETH_LINK_UP)) {
-		link.link_speed = 0;
+		link.link_speed = ETH_SPEED_NUM_NONE;
 		link.link_duplex = ETH_LINK_HALF_DUPLEX;
 		link.link_status = ETH_LINK_DOWN;
-		link.link_autoneg = ETH_LINK_SPEED_FIXED;
+		link.link_autoneg = ETH_LINK_FIXED;
 	}
-	rte_em_dev_atomic_write_link_status(dev, &link);
 
-	/* not changed */
-	if (old.link_status == link.link_status)
-		return -1;
-
-	/* changed */
-	return 0;
+	return rte_eth_linkstatus_set(dev, &link);
 }
 
 /*
@@ -1383,22 +1398,27 @@ em_vlan_hw_strip_enable(struct rte_eth_dev *dev)
 	E1000_WRITE_REG(hw, E1000_CTRL, reg);
 }
 
-static void
+static int
 eth_em_vlan_offload_set(struct rte_eth_dev *dev, int mask)
 {
+	struct rte_eth_rxmode *rxmode;
+
+	rxmode = &dev->data->dev_conf.rxmode;
 	if(mask & ETH_VLAN_STRIP_MASK){
-		if (dev->data->dev_conf.rxmode.hw_vlan_strip)
+		if (rxmode->offloads & DEV_RX_OFFLOAD_VLAN_STRIP)
 			em_vlan_hw_strip_enable(dev);
 		else
 			em_vlan_hw_strip_disable(dev);
 	}
 
 	if(mask & ETH_VLAN_FILTER_MASK){
-		if (dev->data->dev_conf.rxmode.hw_vlan_filter)
+		if (rxmode->offloads & DEV_RX_OFFLOAD_VLAN_FILTER)
 			em_vlan_hw_filter_enable(dev);
 		else
 			em_vlan_hw_filter_disable(dev);
 	}
+
+	return 0;
 }
 
 /*
@@ -1421,7 +1441,8 @@ eth_em_interrupt_setup(struct rte_eth_dev *dev)
 	/* clear interrupt */
 	E1000_READ_REG(hw, E1000_ICR);
 	regval = E1000_READ_REG(hw, E1000_IMS);
-	E1000_WRITE_REG(hw, E1000_IMS, regval | E1000_ICR_LSC);
+	E1000_WRITE_REG(hw, E1000_IMS,
+			regval | E1000_ICR_LSC | E1000_ICR_OTHER);
 	return 0;
 }
 
@@ -1471,7 +1492,7 @@ em_rxq_intr_enable(struct e1000_hw *hw)
 static void
 em_lsc_intr_disable(struct e1000_hw *hw)
 {
-	E1000_WRITE_REG(hw, E1000_IMC, E1000_IMS_LSC);
+	E1000_WRITE_REG(hw, E1000_IMC, E1000_IMS_LSC | E1000_IMS_OTHER);
 	E1000_WRITE_FLUSH(hw);
 }
 
@@ -1530,13 +1551,14 @@ eth_em_interrupt_get_status(struct rte_eth_dev *dev)
  *  - On failure, a negative value.
  */
 static int
-eth_em_interrupt_action(struct rte_eth_dev *dev)
+eth_em_interrupt_action(struct rte_eth_dev *dev,
+			struct rte_intr_handle *intr_handle)
 {
+	struct rte_pci_device *pci_dev = RTE_ETH_DEV_TO_PCI(dev);
 	struct e1000_hw *hw =
 		E1000_DEV_PRIVATE_TO_HW(dev->data->dev_private);
 	struct e1000_interrupt *intr =
 		E1000_DEV_PRIVATE_TO_INTR(dev->data->dev_private);
-	uint32_t tctl, rctl;
 	struct rte_eth_link link;
 	int ret;
 
@@ -1544,7 +1566,7 @@ eth_em_interrupt_action(struct rte_eth_dev *dev)
 		return -1;
 
 	intr->flags &= ~E1000_FLAG_NEED_LINK_UPDATE;
-	rte_intr_enable(&(dev->pci_dev->intr_handle));
+	rte_intr_enable(intr_handle);
 
 	/* set get_link_status to check register later */
 	hw->mac.get_link_status = 1;
@@ -1554,34 +1576,19 @@ eth_em_interrupt_action(struct rte_eth_dev *dev)
 	if (ret < 0)
 		return 0;
 
-	memset(&link, 0, sizeof(link));
-	rte_em_dev_atomic_read_link_status(dev, &link);
+	rte_eth_linkstatus_get(dev, &link);
+
 	if (link.link_status) {
 		PMD_INIT_LOG(INFO, " Port %d: Link Up - speed %u Mbps - %s",
-			     dev->data->port_id, (unsigned)link.link_speed,
+			     dev->data->port_id, link.link_speed,
 			     link.link_duplex == ETH_LINK_FULL_DUPLEX ?
 			     "full-duplex" : "half-duplex");
 	} else {
 		PMD_INIT_LOG(INFO, " Port %d: Link Down", dev->data->port_id);
 	}
 	PMD_INIT_LOG(DEBUG, "PCI Address: %04d:%02d:%02d:%d",
-		     dev->pci_dev->addr.domain, dev->pci_dev->addr.bus,
-		     dev->pci_dev->addr.devid, dev->pci_dev->addr.function);
-
-	tctl = E1000_READ_REG(hw, E1000_TCTL);
-	rctl = E1000_READ_REG(hw, E1000_RCTL);
-	if (link.link_status) {
-		/* enable Tx/Rx */
-		tctl |= E1000_TCTL_EN;
-		rctl |= E1000_RCTL_EN;
-	} else {
-		/* disable Tx/Rx */
-		tctl &= ~E1000_TCTL_EN;
-		rctl &= ~E1000_RCTL_EN;
-	}
-	E1000_WRITE_REG(hw, E1000_TCTL, tctl);
-	E1000_WRITE_REG(hw, E1000_RCTL, rctl);
-	E1000_WRITE_FLUSH(hw);
+		     pci_dev->addr.domain, pci_dev->addr.bus,
+		     pci_dev->addr.devid, pci_dev->addr.function);
 
 	return 0;
 }
@@ -1598,14 +1605,13 @@ eth_em_interrupt_action(struct rte_eth_dev *dev)
  *  void
  */
 static void
-eth_em_interrupt_handler(__rte_unused struct rte_intr_handle *handle,
-							void *param)
+eth_em_interrupt_handler(void *param)
 {
 	struct rte_eth_dev *dev = (struct rte_eth_dev *)param;
 
 	eth_em_interrupt_get_status(dev);
-	eth_em_interrupt_action(dev);
-	_rte_eth_dev_callback_process(dev, RTE_ETH_EVENT_INTR_LSC);
+	eth_em_interrupt_action(dev, dev->intr_handle);
+	_rte_eth_dev_callback_process(dev, RTE_ETH_EVENT_INTR_LSC, NULL);
 }
 
 static int
@@ -1728,13 +1734,13 @@ eth_em_flow_ctrl_set(struct rte_eth_dev *dev, struct rte_eth_fc_conf *fc_conf)
 	return -EIO;
 }
 
-static void
+static int
 eth_em_rar_set(struct rte_eth_dev *dev, struct ether_addr *mac_addr,
 		uint32_t index, __rte_unused uint32_t pool)
 {
 	struct e1000_hw *hw = E1000_DEV_PRIVATE_TO_HW(dev->data->dev_private);
 
-	e1000_rar_set(hw, mac_addr->addr_bytes, index);
+	return e1000_rar_set(hw, mac_addr->addr_bytes, index);
 }
 
 static void
@@ -1746,6 +1752,15 @@ eth_em_rar_clear(struct rte_eth_dev *dev, uint32_t index)
 	memset(addr, 0, sizeof(addr));
 
 	e1000_rar_set(hw, addr, index);
+}
+
+static int
+eth_em_default_mac_addr_set(struct rte_eth_dev *dev,
+			    struct ether_addr *addr)
+{
+	eth_em_rar_clear(dev, 0);
+
+	return eth_em_rar_set(dev, (void *)addr, 0, 0);
 }
 
 static int
@@ -1774,10 +1789,12 @@ eth_em_mtu_set(struct rte_eth_dev *dev, uint16_t mtu)
 
 	/* switch to jumbo mode if needed */
 	if (frame_size > ETHER_MAX_LEN) {
-		dev->data->dev_conf.rxmode.jumbo_frame = 1;
+		dev->data->dev_conf.rxmode.offloads |=
+			DEV_RX_OFFLOAD_JUMBO_FRAME;
 		rctl |= E1000_RCTL_LPE;
 	} else {
-		dev->data->dev_conf.rxmode.jumbo_frame = 0;
+		dev->data->dev_conf.rxmode.offloads &=
+			~DEV_RX_OFFLOAD_JUMBO_FRAME;
 		rctl &= ~E1000_RCTL_LPE;
 	}
 	E1000_WRITE_REG(hw, E1000_RCTL, rctl);
@@ -1799,10 +1816,12 @@ eth_em_set_mc_addr_list(struct rte_eth_dev *dev,
 	return 0;
 }
 
-struct rte_driver em_pmd_drv = {
-	.type = PMD_PDEV,
-	.init = rte_em_pmd_init,
-};
+RTE_PMD_REGISTER_PCI(net_e1000_em, rte_em_pmd);
+RTE_PMD_REGISTER_PCI_TABLE(net_e1000_em, pci_id_em_map);
+RTE_PMD_REGISTER_KMOD_DEP(net_e1000_em, "* igb_uio | uio_pci_generic | vfio-pci");
 
-PMD_REGISTER_DRIVER(em_pmd_drv, em);
-DRIVER_REGISTER_PCI_TABLE(em, pci_id_em_map);
+/* see e1000_logs.c */
+RTE_INIT(igb_init_log)
+{
+	e1000_igb_init_log();
+}

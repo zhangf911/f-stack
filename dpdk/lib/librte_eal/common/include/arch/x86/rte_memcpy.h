@@ -1,34 +1,5 @@
-/*-
- *   BSD LICENSE
- *
- *   Copyright(c) 2010-2014 Intel Corporation. All rights reserved.
- *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright(c) 2010-2014 Intel Corporation
  */
 
 #ifndef _RTE_MEMCPY_X86_64_H_
@@ -44,6 +15,8 @@
 #include <stdint.h>
 #include <string.h>
 #include <rte_vect.h>
+#include <rte_common.h>
+#include <rte_config.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -64,10 +37,12 @@ extern "C" {
  * @return
  *   Pointer to the destination data.
  */
-static inline void *
-rte_memcpy(void *dst, const void *src, size_t n) __attribute__((always_inline));
+static __rte_always_inline void *
+rte_memcpy(void *dst, const void *src, size_t n);
 
 #ifdef RTE_MACHINE_CPUFLAG_AVX512F
+
+#define ALIGNMENT_MASK 0x3F
 
 /**
  * AVX512 implementation below
@@ -77,7 +52,7 @@ rte_memcpy(void *dst, const void *src, size_t n) __attribute__((always_inline));
  * Copy 16 bytes from one location to another,
  * locations should not overlap.
  */
-static inline void
+static __rte_always_inline void
 rte_mov16(uint8_t *dst, const uint8_t *src)
 {
 	__m128i xmm0;
@@ -90,7 +65,7 @@ rte_mov16(uint8_t *dst, const uint8_t *src)
  * Copy 32 bytes from one location to another,
  * locations should not overlap.
  */
-static inline void
+static __rte_always_inline void
 rte_mov32(uint8_t *dst, const uint8_t *src)
 {
 	__m256i ymm0;
@@ -103,7 +78,7 @@ rte_mov32(uint8_t *dst, const uint8_t *src)
  * Copy 64 bytes from one location to another,
  * locations should not overlap.
  */
-static inline void
+static __rte_always_inline void
 rte_mov64(uint8_t *dst, const uint8_t *src)
 {
 	__m512i zmm0;
@@ -116,7 +91,7 @@ rte_mov64(uint8_t *dst, const uint8_t *src)
  * Copy 128 bytes from one location to another,
  * locations should not overlap.
  */
-static inline void
+static __rte_always_inline void
 rte_mov128(uint8_t *dst, const uint8_t *src)
 {
 	rte_mov64(dst + 0 * 64, src + 0 * 64);
@@ -127,7 +102,7 @@ rte_mov128(uint8_t *dst, const uint8_t *src)
  * Copy 256 bytes from one location to another,
  * locations should not overlap.
  */
-static inline void
+static __rte_always_inline void
 rte_mov256(uint8_t *dst, const uint8_t *src)
 {
 	rte_mov64(dst + 0 * 64, src + 0 * 64);
@@ -189,7 +164,7 @@ rte_mov512blocks(uint8_t *dst, const uint8_t *src, size_t n)
 }
 
 static inline void *
-rte_memcpy(void *dst, const void *src, size_t n)
+rte_memcpy_generic(void *dst, const void *src, size_t n)
 {
 	uintptr_t dstu = (uintptr_t)dst;
 	uintptr_t srcu = (uintptr_t)src;
@@ -308,6 +283,8 @@ COPY_BLOCK_128_BACK63:
 
 #elif defined RTE_MACHINE_CPUFLAG_AVX2
 
+#define ALIGNMENT_MASK 0x1F
+
 /**
  * AVX2 implementation below
  */
@@ -316,7 +293,7 @@ COPY_BLOCK_128_BACK63:
  * Copy 16 bytes from one location to another,
  * locations should not overlap.
  */
-static inline void
+static __rte_always_inline void
 rte_mov16(uint8_t *dst, const uint8_t *src)
 {
 	__m128i xmm0;
@@ -329,7 +306,7 @@ rte_mov16(uint8_t *dst, const uint8_t *src)
  * Copy 32 bytes from one location to another,
  * locations should not overlap.
  */
-static inline void
+static __rte_always_inline void
 rte_mov32(uint8_t *dst, const uint8_t *src)
 {
 	__m256i ymm0;
@@ -342,7 +319,7 @@ rte_mov32(uint8_t *dst, const uint8_t *src)
  * Copy 64 bytes from one location to another,
  * locations should not overlap.
  */
-static inline void
+static __rte_always_inline void
 rte_mov64(uint8_t *dst, const uint8_t *src)
 {
 	rte_mov32((uint8_t *)dst + 0 * 32, (const uint8_t *)src + 0 * 32);
@@ -387,7 +364,7 @@ rte_mov128blocks(uint8_t *dst, const uint8_t *src, size_t n)
 }
 
 static inline void *
-rte_memcpy(void *dst, const void *src, size_t n)
+rte_memcpy_generic(void *dst, const void *src, size_t n)
 {
 	uintptr_t dstu = (uintptr_t)dst;
 	uintptr_t srcu = (uintptr_t)src;
@@ -499,6 +476,8 @@ COPY_BLOCK_128_BACK31:
 
 #else /* RTE_MACHINE_CPUFLAG */
 
+#define ALIGNMENT_MASK 0x0F
+
 /**
  * SSE & AVX implementation below
  */
@@ -507,7 +486,7 @@ COPY_BLOCK_128_BACK31:
  * Copy 16 bytes from one location to another,
  * locations should not overlap.
  */
-static inline void
+static __rte_always_inline void
 rte_mov16(uint8_t *dst, const uint8_t *src)
 {
 	__m128i xmm0;
@@ -520,7 +499,7 @@ rte_mov16(uint8_t *dst, const uint8_t *src)
  * Copy 32 bytes from one location to another,
  * locations should not overlap.
  */
-static inline void
+static __rte_always_inline void
 rte_mov32(uint8_t *dst, const uint8_t *src)
 {
 	rte_mov16((uint8_t *)dst + 0 * 16, (const uint8_t *)src + 0 * 16);
@@ -531,7 +510,7 @@ rte_mov32(uint8_t *dst, const uint8_t *src)
  * Copy 64 bytes from one location to another,
  * locations should not overlap.
  */
-static inline void
+static __rte_always_inline void
 rte_mov64(uint8_t *dst, const uint8_t *src)
 {
 	rte_mov16((uint8_t *)dst + 0 * 16, (const uint8_t *)src + 0 * 16);
@@ -594,8 +573,8 @@ rte_mov256(uint8_t *dst, const uint8_t *src)
  * - __m128i <xmm0> ~ <xmm8> must be pre-defined
  */
 #define MOVEUNALIGNED_LEFT47_IMM(dst, src, len, offset)                                                     \
-({                                                                                                          \
-    int tmp;                                                                                                \
+__extension__ ({                                                                                            \
+    size_t tmp;                                                                                                \
     while (len >= 128 + 16 - offset) {                                                                      \
         xmm0 = _mm_loadu_si128((const __m128i *)((const uint8_t *)src - offset + 0 * 16));                  \
         len -= 128;                                                                                         \
@@ -655,7 +634,7 @@ rte_mov256(uint8_t *dst, const uint8_t *src)
  * - __m128i <xmm0> ~ <xmm8> used in MOVEUNALIGNED_LEFT47_IMM must be pre-defined
  */
 #define MOVEUNALIGNED_LEFT47(dst, src, len, offset)                   \
-({                                                                    \
+__extension__ ({                                                      \
     switch (offset) {                                                 \
     case 0x01: MOVEUNALIGNED_LEFT47_IMM(dst, src, n, 0x01); break;    \
     case 0x02: MOVEUNALIGNED_LEFT47_IMM(dst, src, n, 0x02); break;    \
@@ -677,7 +656,7 @@ rte_mov256(uint8_t *dst, const uint8_t *src)
 })
 
 static inline void *
-rte_memcpy(void *dst, const void *src, size_t n)
+rte_memcpy_generic(void *dst, const void *src, size_t n)
 {
 	__m128i xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8;
 	uintptr_t dstu = (uintptr_t)dst;
@@ -820,6 +799,75 @@ COPY_BLOCK_64_BACK15:
 }
 
 #endif /* RTE_MACHINE_CPUFLAG */
+
+static inline void *
+rte_memcpy_aligned(void *dst, const void *src, size_t n)
+{
+	void *ret = dst;
+
+	/* Copy size <= 16 bytes */
+	if (n < 16) {
+		if (n & 0x01) {
+			*(uint8_t *)dst = *(const uint8_t *)src;
+			src = (const uint8_t *)src + 1;
+			dst = (uint8_t *)dst + 1;
+		}
+		if (n & 0x02) {
+			*(uint16_t *)dst = *(const uint16_t *)src;
+			src = (const uint16_t *)src + 1;
+			dst = (uint16_t *)dst + 1;
+		}
+		if (n & 0x04) {
+			*(uint32_t *)dst = *(const uint32_t *)src;
+			src = (const uint32_t *)src + 1;
+			dst = (uint32_t *)dst + 1;
+		}
+		if (n & 0x08)
+			*(uint64_t *)dst = *(const uint64_t *)src;
+
+		return ret;
+	}
+
+	/* Copy 16 <= size <= 32 bytes */
+	if (n <= 32) {
+		rte_mov16((uint8_t *)dst, (const uint8_t *)src);
+		rte_mov16((uint8_t *)dst - 16 + n,
+				(const uint8_t *)src - 16 + n);
+
+		return ret;
+	}
+
+	/* Copy 32 < size <= 64 bytes */
+	if (n <= 64) {
+		rte_mov32((uint8_t *)dst, (const uint8_t *)src);
+		rte_mov32((uint8_t *)dst - 32 + n,
+				(const uint8_t *)src - 32 + n);
+
+		return ret;
+	}
+
+	/* Copy 64 bytes blocks */
+	for (; n >= 64; n -= 64) {
+		rte_mov64((uint8_t *)dst, (const uint8_t *)src);
+		dst = (uint8_t *)dst + 64;
+		src = (const uint8_t *)src + 64;
+	}
+
+	/* Copy whatever left */
+	rte_mov64((uint8_t *)dst - 64 + n,
+			(const uint8_t *)src - 64 + n);
+
+	return ret;
+}
+
+static inline void *
+rte_memcpy(void *dst, const void *src, size_t n)
+{
+	if (!(((uintptr_t)dst | (uintptr_t)src) & ALIGNMENT_MASK))
+		return rte_memcpy_aligned(dst, src, n);
+	else
+		return rte_memcpy_generic(dst, src, n);
+}
 
 #ifdef __cplusplus
 }

@@ -1,35 +1,6 @@
-/*******************************************************************************
-
-Copyright (c) 2001-2015, Intel Corporation
-All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-
- 1. Redistributions of source code must retain the above copyright notice,
-    this list of conditions and the following disclaimer.
-
- 2. Redistributions in binary form must reproduce the above copyright
-    notice, this list of conditions and the following disclaimer in the
-    documentation and/or other materials provided with the distribution.
-
- 3. Neither the name of the Intel Corporation nor the names of its
-    contributors may be used to endorse or promote products derived from
-    this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
-LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-POSSIBILITY OF SUCH DAMAGE.
-
-***************************************************************************/
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright(c) 2001-2018
+ */
 
 #ifndef _IXGBE_PHY_H_
 #define _IXGBE_PHY_H_
@@ -70,6 +41,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #define IXGBE_SFF_1GBASESX_CAPABLE	0x1
 #define IXGBE_SFF_1GBASELX_CAPABLE	0x2
 #define IXGBE_SFF_1GBASET_CAPABLE	0x8
+#define IXGBE_SFF_1GBASELHA_CAPABLE	0x10
 #define IXGBE_SFF_10GBASESR_CAPABLE	0x10
 #define IXGBE_SFF_10GBASELR_CAPABLE	0x20
 #define IXGBE_SFF_SOFT_RS_SELECT_MASK	0x8
@@ -92,8 +64,9 @@ POSSIBILITY OF SUCH DAMAGE.
 #define IXGBE_CS4227_GLOBAL_ID_MSB	1
 #define IXGBE_CS4227_SCRATCH		2
 #define IXGBE_CS4227_GLOBAL_ID_VALUE	0x03E5
-#define IXGBE_CS4223_PHY_ID		0x7003/* Quad port */
-#define IXGBE_CS4227_PHY_ID		0x3003/* Dual port */
+#define IXGBE_CS4227_EFUSE_PDF_SKU	0x19F
+#define IXGBE_CS4223_SKU_ID		0x0010	/* Quad port */
+#define IXGBE_CS4227_SKU_ID		0x0014	/* Dual port */
 #define IXGBE_CS4227_RESET_PENDING	0x1357
 #define IXGBE_CS4227_RESET_COMPLETE	0x5AA5
 #define IXGBE_CS4227_RETRIES		15
@@ -191,7 +164,7 @@ s32 ixgbe_reset_phy_nl(struct ixgbe_hw *hw);
 s32 ixgbe_set_copper_phy_power(struct ixgbe_hw *hw, bool on);
 s32 ixgbe_identify_module_generic(struct ixgbe_hw *hw);
 s32 ixgbe_identify_sfp_module_generic(struct ixgbe_hw *hw);
-s32 ixgbe_get_supported_phy_sfp_layer_generic(struct ixgbe_hw *hw);
+u64 ixgbe_get_supported_phy_sfp_layer_generic(struct ixgbe_hw *hw);
 s32 ixgbe_identify_qsfp_module_generic(struct ixgbe_hw *hw);
 s32 ixgbe_get_sfp_init_sequence_offsets(struct ixgbe_hw *hw,
 					u16 *list_offset,

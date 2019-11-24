@@ -1,34 +1,5 @@
-/*-
- *   BSD LICENSE
- *
- *   Copyright(c) 2010-2014 Intel Corporation. All rights reserved.
- *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright(c) 2010-2014 Intel Corporation
  */
 #include <string.h>
 
@@ -93,7 +64,7 @@ static void *
 rte_port_ring_writer_ras_create(void *params, int socket_id, int is_ipv4)
 {
 	struct rte_port_ring_writer_ras_params *conf =
-			(struct rte_port_ring_writer_ras_params *) params;
+			params;
 	struct rte_port_ring_writer_ras *port;
 	uint64_t frag_cycles;
 
@@ -167,7 +138,7 @@ send_burst(struct rte_port_ring_writer_ras *p)
 	uint32_t nb_tx;
 
 	nb_tx = rte_ring_sp_enqueue_burst(p->ring, (void **)p->tx_buf,
-			p->tx_buf_count);
+			p->tx_buf_count, NULL);
 
 	RTE_PORT_RING_WRITER_RAS_STATS_PKTS_DROP_ADD(p, p->tx_buf_count - nb_tx);
 	for ( ; nb_tx < p->tx_buf_count; nb_tx++)
@@ -243,7 +214,7 @@ static int
 rte_port_ring_writer_ras_tx(void *port, struct rte_mbuf *pkt)
 {
 	struct rte_port_ring_writer_ras *p =
-			(struct rte_port_ring_writer_ras *) port;
+			port;
 
 	RTE_PORT_RING_WRITER_RAS_STATS_PKTS_IN_ADD(p, 1);
 	p->f_ras(p, pkt);
@@ -259,7 +230,7 @@ rte_port_ring_writer_ras_tx_bulk(void *port,
 		uint64_t pkts_mask)
 {
 	struct rte_port_ring_writer_ras *p =
-			(struct rte_port_ring_writer_ras *) port;
+			port;
 
 	if ((pkts_mask & (pkts_mask + 1)) == 0) {
 		uint64_t n_pkts = __builtin_popcountll(pkts_mask);
@@ -295,7 +266,7 @@ static int
 rte_port_ring_writer_ras_flush(void *port)
 {
 	struct rte_port_ring_writer_ras *p =
-			(struct rte_port_ring_writer_ras *) port;
+			port;
 
 	if (p->tx_buf_count > 0)
 		send_burst(p);
@@ -307,7 +278,7 @@ static int
 rte_port_ring_writer_ras_free(void *port)
 {
 	struct rte_port_ring_writer_ras *p =
-			(struct rte_port_ring_writer_ras *) port;
+			port;
 
 	if (port == NULL) {
 		RTE_LOG(ERR, PORT, "%s: Parameter port is NULL\n", __func__);
@@ -326,7 +297,7 @@ rte_port_ras_writer_stats_read(void *port,
 		struct rte_port_out_stats *stats, int clear)
 {
 	struct rte_port_ring_writer_ras *p =
-		(struct rte_port_ring_writer_ras *) port;
+		port;
 
 	if (stats != NULL)
 		memcpy(stats, &p->stats, sizeof(p->stats));

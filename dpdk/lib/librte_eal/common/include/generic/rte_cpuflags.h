@@ -1,34 +1,5 @@
-/*-
- *   BSD LICENSE
- *
- *   Copyright(c) 2010-2014 Intel Corporation. All rights reserved.
- *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright(c) 2010-2014 Intel Corporation
  */
 
 #ifndef _RTE_CPUFLAGS_H_
@@ -39,11 +10,13 @@
  * Architecture specific API to determine available CPU features at runtime.
  */
 
+#include "rte_common.h"
 #include <errno.h>
 
 /**
  * Enumeration of all CPU features supported
  */
+__extension__
 enum rte_cpu_flag_t;
 
 /**
@@ -55,6 +28,7 @@ enum rte_cpu_flag_t;
  *     flag name
  *     NULL if flag ID is invalid
  */
+__extension__
 const char *
 rte_cpu_get_flag_name(enum rte_cpu_flag_t feature);
 
@@ -68,6 +42,7 @@ rte_cpu_get_flag_name(enum rte_cpu_flag_t feature);
  *     0 if flag is not available
  *     -ENOENT if flag is invalid
  */
+__extension__
 int
 rte_cpu_get_flag_enabled(enum rte_cpu_flag_t feature);
 
@@ -76,7 +51,38 @@ rte_cpu_get_flag_enabled(enum rte_cpu_flag_t feature);
  * that were specified at compile time. It is called automatically within the
  * EAL, so does not need to be used by applications.
  */
+__rte_deprecated
 void
 rte_cpu_check_supported(void);
+
+/**
+ * This function checks that the currently used CPU supports the CPU features
+ * that were specified at compile time. It is called automatically within the
+ * EAL, so does not need to be used by applications.  This version returns a
+ * result so that decisions may be made (for instance, graceful shutdowns).
+ */
+int
+rte_cpu_is_supported(void);
+
+/**
+ * This function attempts to retrieve a value from the auxiliary vector.
+ * If it is unsuccessful, the result will be 0, and errno will be set.
+ *
+ * @return A value from the auxiliary vector.  When the value is 0, check
+ * errno to determine if an error occurred.
+ */
+unsigned long
+rte_cpu_getauxval(unsigned long type);
+
+/**
+ * This function retrieves a value from the auxiliary vector, and compares it
+ * as a string against the value retrieved.
+ *
+ * @return The result of calling strcmp() against the value retrieved from
+ * the auxiliary vector.  When the value is 0 (meaning a match is found),
+ * check errno to determine if an error occurred.
+ */
+int
+rte_cpu_strcmp_auxval(unsigned long type, const char *str);
 
 #endif /* _RTE_CPUFLAGS_H_ */

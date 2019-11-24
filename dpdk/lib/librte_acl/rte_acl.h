@@ -1,34 +1,5 @@
-/*-
- *   BSD LICENSE
- *
- *   Copyright(c) 2010-2014 Intel Corporation. All rights reserved.
- *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright(c) 2010-2014 Intel Corporation
  */
 
 #ifndef _RTE_ACL_H_
@@ -117,10 +88,8 @@ enum {
 	RTE_ACL_TYPE_SHIFT = 29,
 	RTE_ACL_MAX_INDEX = RTE_LEN2MASK(RTE_ACL_TYPE_SHIFT, uint32_t),
 	RTE_ACL_MAX_PRIORITY = RTE_ACL_MAX_INDEX,
-	RTE_ACL_MIN_PRIORITY = 0,
+	RTE_ACL_MIN_PRIORITY = 1,
 };
-
-#define	RTE_ACL_INVALID_USERDATA	0
 
 #define	RTE_ACL_MASKLEN_TO_BITMASK(v, s)	\
 ((v) == 0 ? (v) : (typeof(v))((uint64_t)-1 << ((s) * CHAR_BIT - (v))))
@@ -144,7 +113,7 @@ struct rte_acl_rule_data {
 	struct rte_acl_field field[fld_num];         \
 }
 
-RTE_ACL_RULE_DEF(rte_acl_rule, 0);
+RTE_ACL_RULE_DEF(rte_acl_rule,);
 
 #define	RTE_ACL_RULE_SZ(fld_num)	\
 	(sizeof(struct rte_acl_rule) + sizeof(struct rte_acl_field) * (fld_num))
@@ -271,6 +240,7 @@ enum rte_acl_classify_alg {
 	RTE_ACL_CLASSIFY_SSE = 2,     /**< requires SSE4.1 support. */
 	RTE_ACL_CLASSIFY_AVX2 = 3,    /**< requires AVX2 support. */
 	RTE_ACL_CLASSIFY_NEON = 4,    /**< requires NEON support. */
+	RTE_ACL_CLASSIFY_ALTIVEC = 5,    /**< requires ALTIVEC support. */
 	RTE_ACL_CLASSIFY_NUM          /* should always be the last one. */
 };
 

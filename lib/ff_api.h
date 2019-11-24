@@ -33,20 +33,38 @@ extern "C" {
 #include <sys/socket.h>
 #include <sys/select.h>
 #include <sys/poll.h>
+#include <netinet/in.h>
+#include <sys/time.h>
 
 #include "ff_event.h"
 #include "ff_errno.h"
 
 struct linux_sockaddr {
     short sa_family;
-    char sa_data[14];
+    char sa_data[126];
 };
+
+/* AF_INET6/PF_INET6 is 10 in linux
+ * defined 28 for FreeBSD
+ */
+#ifdef AF_INET6
+#undef AF_INET6
+#endif
+#ifdef PF_INET6
+#undef PF_INET6
+#endif
+#define AF_INET6    28
+#define PF_INET6    AF_INET6
+#define AF_INET6_LINUX    10
+#define PF_INET6_LINUX    AF_INET6_LINUX
 
 typedef int (*loop_func_t)(void *arg);
 
-int ff_init(const char *conf, int argc, char * const argv[]);
+int ff_init(int argc, char * const argv[]);
 
 void ff_run(loop_func_t loop, void *arg);
+
+/* POSIX-LIKE api begin */
 
 int ff_fcntl(int fd, int cmd, ...);
 
@@ -62,8 +80,6 @@ int ff_setsockopt(int s, int level, int optname, const void *optval,
 
 int ff_getsockopt(int s, int level, int optname, void *optval,
     socklen_t *optlen);
-
-int ff_socketpair(int domain, int type, int protocol, int *sv);
 
 int ff_listen(int s, int backlog);
 int ff_bind(int s, const struct linux_sockaddr *addr, socklen_t addrlen);
@@ -101,6 +117,110 @@ int ff_poll(struct pollfd fds[], nfds_t nfds, int timeout);
 int ff_kqueue(void);
 int ff_kevent(int kq, const struct kevent *changelist, int nchanges, 
     struct kevent *eventlist, int nevents, const struct timespec *timeout);
+int ff_kevent_do_each(int kq, const struct kevent *changelist, int nchanges, 
+    void *eventlist, int nevents, const struct timespec *timeout, 
+    void (*do_each)(void **, struct kevent *));
+
+int ff_gettimeofday(struct timeval *tv, struct timezone *tz);
+
+int ff_dup(int oldfd);
+int ff_dup2(int oldfd, int newfd);
+
+/* POSIX-LIKE api end */
+
+
+/* Tests if fd is used by F-Stack */
+extern int ff_fdisused(int fd);
+
+extern int ff_getmaxfd(void);
+
+/* route api begin */
+enum FF_ROUTE_CTL {
+    FF_ROUTE_ADD,
+    FF_ROUTE_DEL,
+    FF_ROUTE_CHANGE,
+};
+
+enum FF_ROUTE_FLAG {
+    FF_RTF_HOST,
+    FF_RTF_GATEWAY,
+};
+
+/*
+ * On success, 0 is returned.
+ * On error, -1 is returned, and errno is set appropriately.
+ */
+int ff_route_ctl(enum FF_ROUTE_CTL req, enum FF_ROUTE_FLAG flag,
+    struct linux_sockaddr *dst, struct linux_sockaddr *gw,
+    struct linux_sockaddr *netmask);
+
+/* route api end */
+
+
+/* dispatch api begin */
+#define FF_DISPATCH_ERROR (-1)
+#define FF_DISPATCH_RESPONSE (-2)
+
+/*
+ * Packet dispatch callback function.
+ * Implemented by user.
+ *
+ * @param data
+ *   The data pointer of this packet.
+ * @param len
+ *   The length of this packet.
+ * @param queue_id
+ *   Current queue of this packet.
+ * @param nb_queues
+ *   Number of queues to be dispatched.
+ *
+ * @return 0 to (nb_queues - 1)
+ *   The queue id that the packet will be dispatched to.
+ * @return FF_DISPATCH_ERROR (-1)
+ *   Error occurs or packet is handled by user, packet will be freed.
+* @return FF_DISPATCH_RESPONSE (-2)
+ *   Packet is handled by user, packet will be responsed.
+ *
+ */
+typedef int (*dispatch_func_t)(void *data, uint16_t *len,
+    uint16_t queue_id, uint16_t nb_queues);
+
+/* regist a packet dispath function */
+void ff_regist_packet_dispatcher(dispatch_func_t func);
+
+/* dispatch api end */
+
+
+/* internal api begin */
+
+/* FreeBSD style calls. Used for tools. */
+int ff_ioctl_freebsd(int fd, unsigned long request, ...);
+int ff_setsockopt_freebsd(int s, int level, int optname,
+    const void *optval, socklen_t optlen);
+int ff_getsockopt_freebsd(int s, int level, int optname,
+    void *optval, socklen_t *optlen);
+
+/*
+ * Handle rtctl.
+ * The data is a pointer to struct rt_msghdr.
+ */
+int ff_rtioctl(int fib, void *data, unsigned *plen, unsigned maxlen);
+
+/*
+ * Handle ngctl.
+ */
+enum FF_NGCTL_CMD {
+    NGCTL_SOCKET,
+    NGCTL_BIND,
+    NGCTL_CONNECT,
+    NGCTL_SEND,
+    NGCTL_RECV,
+    NGCTL_CLOSE,
+};
+
+int ff_ngctl(int cmd, void *data);
+
+/* internal api end */
 
 #ifdef __cplusplus
 }

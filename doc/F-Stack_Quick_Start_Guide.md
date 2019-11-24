@@ -44,33 +44,36 @@ The mount point can be made permanent across reboots, by adding the following li
 ## offload NIC
 
     modprobe uio
-    insmod /data/f-stack/dpdk/x86_64-native-linuxapp-gcc/build/kmod/igb_uio.ko
-    insmod /data/f-stack/dpdk/x86_64-native-linuxapp-gcc/build/kmod/rte_kni.ko
-	python dpdk-devbind.py --status
+    insmod /data/f-stack/dpdk/x86_64-native-linuxapp-gcc/kmod/igb_uio.ko
+    insmod /data/f-stack/dpdk/x86_64-native-linuxapp-gcc/kmod/rte_kni.ko carrier=on
+    python dpdk-devbind.py --status
     ifconfig eth0 down
-	python dpdk-devbind.py --bind=igb_uio eth0 # assuming that use 10GE NIC and eth0
+    python dpdk-devbind.py --bind=igb_uio eth0 # assuming that use 10GE NIC and eth0
 
 ## Compile  lib
 
-	cd ../../
+    export FF_PATH=/data/f-stack
+    export FF_DPDK=/data/f-stack/dpdk/x86_64-native-linuxapp-gcc
+    cd ../../
     cd lib
-	make
-	export FF_PATH=/data/f-stack
-	export FF_DPDK=/data/f-stack/dpdk/x86_64-native-linuxapp-gcc
+    make
 
 ### Compile Nginx
 
 	cd ../
-	cd app/nginx-1.11.10
+	cd app/nginx-1.16.1
 	./configure --prefix=/usr/local/nginx_fstack --with-ff_module
 	make
 	make install
 	cd ../../
-	./start.sh -b /usr/local/nginx_fstack/sbin/nginx -c config.ini
+	/usr/local/nginx_fstack/sbin/nginx
 
 ### Compile Redis
 
-	cd app/redis-3.2.8/
+	cd app/redis-5.0.5/
 	make
-	make install
+	# run with start.sh
+	./start.sh -b ./redis-server -o /path/to/redis.conf
+	# or run like this:
+	#./redis-server --conf config.ini --proc-type=primary --proc-id=0 /path/to/redis.conf
 

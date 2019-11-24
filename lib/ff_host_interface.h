@@ -56,7 +56,10 @@ void ff_free(void *p);
 
 void ff_clock_gettime(int id, int64_t *sec, long *nsec);
 uint64_t ff_clock_gettime_ns(int id);
-int ff_nanosleep(uint64_t nsecs);
+uint64_t ff_get_tsc_ns(void);
+
+void ff_get_current_time(int64_t *sec, long *nsec);
+void ff_update_current_ts(void);
 
 typedef void * ff_mutex_t;
 typedef void * ff_cond_t;
@@ -70,7 +73,8 @@ char *ff_getenv(const char *name);
 
 void ff_os_errno(int error);
 
-int ff_rss_check(uint32_t saddr, uint32_t daddr, uint16_t sport, uint16_t dport);
+int ff_rss_check(void *softc, uint32_t saddr, uint32_t daddr,
+    uint16_t sport, uint16_t dport);
 
 #endif
 

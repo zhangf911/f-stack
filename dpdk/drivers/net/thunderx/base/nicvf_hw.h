@@ -1,33 +1,5 @@
-/*
- *   BSD LICENSE
- *
- *   Copyright (C) Cavium networks Ltd. 2016.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Cavium networks nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright(c) 2016 Cavium, Inc
  */
 
 #ifndef _THUNDERX_NICVF_HW_H
@@ -37,11 +9,13 @@
 
 #include "nicvf_hw_defs.h"
 
-#define	PCI_VENDOR_ID_CAVIUM			0x177D
-#define	PCI_DEVICE_ID_THUNDERX_PASS1_NICVF	0x0011
-#define	PCI_DEVICE_ID_THUNDERX_PASS2_NICVF	0xA034
-#define	PCI_SUB_DEVICE_ID_THUNDERX_PASS1_NICVF	0xA11E
-#define	PCI_SUB_DEVICE_ID_THUNDERX_PASS2_NICVF	0xA134
+#define	PCI_VENDOR_ID_CAVIUM				0x177D
+#define	PCI_DEVICE_ID_THUNDERX_CN88XX_PASS1_NICVF	0x0011
+#define	PCI_DEVICE_ID_THUNDERX_NICVF			0xA034
+#define	PCI_SUB_DEVICE_ID_CN88XX_PASS1_NICVF		0xA11E
+#define	PCI_SUB_DEVICE_ID_CN88XX_PASS2_NICVF		0xA134
+#define	PCI_SUB_DEVICE_ID_CN81XX_NICVF			0xA234
+#define	PCI_SUB_DEVICE_ID_CN83XX_NICVF			0xA334
 
 #define NICVF_ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 
@@ -50,10 +24,11 @@
 #define NICVF_GET_TX_STATS(reg) \
 	nicvf_reg_read(nic, NIC_VNIC_TX_STAT_0_4 | (reg << 3))
 
-#define NICVF_PASS1	(PCI_SUB_DEVICE_ID_THUNDERX_PASS1_NICVF)
-#define NICVF_PASS2	(PCI_SUB_DEVICE_ID_THUNDERX_PASS2_NICVF)
-
-#define NICVF_CAP_TUNNEL_PARSING          (1ULL << 0)
+#define NICVF_CAP_TUNNEL_PARSING	(1ULL << 0)
+/* Additional word in Rx descriptor to hold optional tunneling extension info */
+#define NICVF_CAP_CQE_RX2		(1ULL << 1)
+/* The device capable of setting NIC_CQE_RX_S[APAD] == 0 */
+#define NICVF_CAP_DISABLE_APAD		(1ULL << 2)
 
 enum nicvf_tns_mode {
 	NIC_TNS_BYPASS_MODE,
@@ -85,7 +60,7 @@ enum nicvf_err_e {
 	NICVF_ERR_RSS_GET_SZ,    /* -8171 */
 };
 
-typedef nicvf_phys_addr_t (*rbdr_pool_get_handler)(void *opaque);
+typedef nicvf_iova_addr_t (*rbdr_pool_get_handler)(void *dev, void *opaque);
 
 struct nicvf_hw_rx_qstats {
 	uint64_t q_rx_bytes;
@@ -194,8 +169,8 @@ int nicvf_qset_reclaim(struct nicvf *nic);
 
 int nicvf_qset_rbdr_config(struct nicvf *nic, uint16_t qidx);
 int nicvf_qset_rbdr_reclaim(struct nicvf *nic, uint16_t qidx);
-int nicvf_qset_rbdr_precharge(struct nicvf *nic, uint16_t ridx,
-			      rbdr_pool_get_handler handler, void *opaque,
+int nicvf_qset_rbdr_precharge(void *dev, struct nicvf *nic,
+			      uint16_t ridx, rbdr_pool_get_handler handler,
 			      uint32_t max_buffs);
 int nicvf_qset_rbdr_active(struct nicvf *nic, uint16_t qidx);
 
@@ -216,6 +191,9 @@ uint32_t nicvf_qsize_cq_roundup(uint32_t val);
 uint32_t nicvf_qsize_sq_roundup(uint32_t val);
 
 void nicvf_vlan_hw_strip(struct nicvf *nic, bool enable);
+
+void nicvf_apad_config(struct nicvf *nic, bool enable);
+void nicvf_first_skip_config(struct nicvf *nic, uint8_t dwords);
 
 int nicvf_rss_config(struct nicvf *nic, uint32_t  qcnt, uint64_t cfg);
 int nicvf_rss_term(struct nicvf *nic);

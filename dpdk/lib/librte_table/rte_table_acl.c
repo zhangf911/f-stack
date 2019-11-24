@@ -1,34 +1,5 @@
-/*-
- *   BSD LICENSE
- *
- *   Copyright(c) 2010-2014 Intel Corporation. All rights reserved.
- *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright(c) 2010-2014 Intel Corporation
  */
 
 #include <string.h>
@@ -87,7 +58,7 @@ rte_table_acl_create(
 	int socket_id,
 	uint32_t entry_size)
 {
-	struct rte_table_acl_params *p = (struct rte_table_acl_params *) params;
+	struct rte_table_acl_params *p = params;
 	struct rte_table_acl *acl;
 	uint32_t action_table_size, acl_rule_list_size, acl_rule_memory_size;
 	uint32_t total_size;
@@ -168,7 +139,7 @@ rte_table_acl_create(
 static int
 rte_table_acl_free(void *table)
 {
-	struct rte_table_acl *acl = (struct rte_table_acl *) table;
+	struct rte_table_acl *acl = table;
 
 	/* Check input parameters */
 	if (table == NULL) {
@@ -248,9 +219,9 @@ rte_table_acl_entry_add(
 	int *key_found,
 	void **entry_ptr)
 {
-	struct rte_table_acl *acl = (struct rte_table_acl *) table;
+	struct rte_table_acl *acl = table;
 	struct rte_table_acl_rule_add_params *rule =
-		(struct rte_table_acl_rule_add_params *) key;
+		key;
 	struct rte_pipeline_acl_rule acl_rule;
 	struct rte_acl_rule *rule_location;
 	struct rte_acl_ctx *ctx;
@@ -366,9 +337,9 @@ rte_table_acl_entry_delete(
 	int *key_found,
 	void *entry)
 {
-	struct rte_table_acl *acl = (struct rte_table_acl *) table;
+	struct rte_table_acl *acl = table;
 	struct rte_table_acl_rule_delete_params *rule =
-		(struct rte_table_acl_rule_delete_params *) key;
+		key;
 	struct rte_acl_rule *deleted_rule = NULL;
 	struct rte_acl_ctx *ctx;
 	uint32_t pos, pos_valid, i;
@@ -450,7 +421,7 @@ rte_table_acl_entry_add_bulk(
 	int *key_found,
 	void **entries_ptr)
 {
-	struct rte_table_acl *acl = (struct rte_table_acl *) table;
+	struct rte_table_acl *acl = table;
 	struct rte_acl_ctx *ctx;
 	uint32_t rule_pos[n_keys];
 	uint32_t i;
@@ -501,13 +472,7 @@ rte_table_acl_entry_add_bulk(
 			return -EINVAL;
 		}
 
-		if (entries_ptr[i] == NULL) {
-			RTE_LOG(ERR, TABLE, "%s: entries_ptr[%" PRIu32 "] parameter is NULL\n",
-					__func__, i);
-			return -EINVAL;
-		}
-
-		rule = (struct rte_table_acl_rule_add_params *) keys[i];
+		rule = keys[i];
 		if (rule->priority > RTE_ACL_MAX_PRIORITY) {
 			RTE_LOG(ERR, TABLE, "%s: Priority is too high\n", __func__);
 			return -EINVAL;
@@ -518,7 +483,7 @@ rte_table_acl_entry_add_bulk(
 	memset(key_found, 0, n_keys * sizeof(int));
 	for (i = 0; i < n_keys; i++) {
 		struct rte_table_acl_rule_add_params *rule =
-				(struct rte_table_acl_rule_add_params *) keys[i];
+				keys[i];
 		struct rte_pipeline_acl_rule acl_rule;
 		struct rte_acl_rule *rule_location;
 		uint32_t free_pos, free_pos_valid, j;
@@ -636,7 +601,7 @@ rte_table_acl_entry_delete_bulk(
 	int *key_found,
 	void **entries)
 {
-	struct rte_table_acl *acl = (struct rte_table_acl *) table;
+	struct rte_table_acl *acl = table;
 	struct rte_acl_rule *deleted_rules[n_keys];
 	uint32_t rule_pos[n_keys];
 	struct rte_acl_ctx *ctx;
@@ -675,7 +640,7 @@ rte_table_acl_entry_delete_bulk(
 	memset(rule_pos, 0, n_keys * sizeof(uint32_t));
 	for (i = 0; i < n_keys; i++) {
 		struct rte_table_acl_rule_delete_params *rule =
-			(struct rte_table_acl_rule_delete_params *) keys[i];
+			keys[i];
 		uint32_t pos_valid, j;
 
 		/* Look for the rule in the table */
@@ -792,7 +757,7 @@ rte_table_acl_lookup(
 
 		pkts_mask &= ~pkt_mask;
 
-		if (action_table_pos != RTE_ACL_INVALID_USERDATA) {
+		if (action_table_pos != 0) {
 			pkts_out_mask |= pkt_mask;
 			entries[pkt_pos] = (void *)
 				&acl->memory[action_table_pos *
@@ -810,7 +775,7 @@ rte_table_acl_lookup(
 static int
 rte_table_acl_stats_read(void *table, struct rte_table_stats *stats, int clear)
 {
-	struct rte_table_acl *acl = (struct rte_table_acl *) table;
+	struct rte_table_acl *acl = table;
 
 	if (stats != NULL)
 		memcpy(stats, &acl->stats, sizeof(acl->stats));

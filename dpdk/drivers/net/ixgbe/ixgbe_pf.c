@@ -1,34 +1,5 @@
-/*-
- *   BSD LICENSE
- *
- *   Copyright(c) 2010-2015 Intel Corporation. All rights reserved.
- *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright(c) 2010-2016 Intel Corporation
  */
 
 #include <stdio.h>
@@ -44,13 +15,14 @@
 #include <rte_debug.h>
 #include <rte_eal.h>
 #include <rte_ether.h>
-#include <rte_ethdev.h>
+#include <rte_ethdev_driver.h>
 #include <rte_memcpy.h>
 #include <rte_malloc.h>
 #include <rte_random.h>
 
 #include "base/ixgbe_common.h"
 #include "ixgbe_ethdev.h"
+#include "rte_pmd_ixgbe.h"
 
 #define IXGBE_MAX_VFTA     (128)
 #define IXGBE_VF_MSG_SIZE_DEFAULT 1
@@ -60,7 +32,9 @@
 static inline uint16_t
 dev_num_vf(struct rte_eth_dev *eth_dev)
 {
-	return eth_dev->pci_dev->max_vfs;
+	struct rte_pci_device *pci_dev = RTE_ETH_DEV_TO_PCI(eth_dev);
+
+	return pci_dev->max_vfs;
 }
 
 static inline
@@ -116,6 +90,8 @@ void ixgbe_pf_host_init(struct rte_eth_dev *eth_dev)
 	if (*vfinfo == NULL)
 		rte_panic("Cannot allocate memory for private VF data\n");
 
+	rte_eth_switch_domain_alloc(&(*vfinfo)->switch_domain_id);
+
 	memset(mirror_info, 0, sizeof(struct ixgbe_mirror_info));
 	memset(uta_info, 0, sizeof(struct ixgbe_uta_info));
 	hw->mac.mc_filter_type = 0;
@@ -148,10 +124,9 @@ void ixgbe_pf_host_uninit(struct rte_eth_dev *eth_dev)
 {
 	struct ixgbe_vf_info **vfinfo;
 	uint16_t vf_num;
+	int ret;
 
 	PMD_INIT_FUNC_TRACE();
-
-	vfinfo = IXGBE_DEV_PRIVATE_TO_P_VFDATA(eth_dev->data->dev_private);
 
 	RTE_ETH_DEV_SRIOV(eth_dev).active = 0;
 	RTE_ETH_DEV_SRIOV(eth_dev).nb_q_per_pool = 0;
@@ -161,6 +136,14 @@ void ixgbe_pf_host_uninit(struct rte_eth_dev *eth_dev)
 	vf_num = dev_num_vf(eth_dev);
 	if (vf_num == 0)
 		return;
+
+	vfinfo = IXGBE_DEV_PRIVATE_TO_P_VFDATA(eth_dev->data->dev_private);
+	if (*vfinfo == NULL)
+		return;
+
+	ret = rte_eth_switch_domain_free((*vfinfo)->switch_domain_id);
+	if (ret)
+		PMD_INIT_LOG(WARNING, "failed to free switch domain: %d", ret);
 
 	rte_free(*vfinfo);
 	*vfinfo = NULL;
@@ -175,6 +158,7 @@ ixgbe_add_tx_flow_control_drop_filter(struct rte_eth_dev *eth_dev)
 		IXGBE_DEV_PRIVATE_TO_FILTER_INFO(eth_dev->data->dev_private);
 	uint16_t vf_num;
 	int i;
+	struct ixgbe_ethertype_filter ethertype_filter;
 
 	if (!hw->mac.ops.set_ethertype_anti_spoofing) {
 		RTE_LOG(INFO, PMD, "ether type anti-spoofing is not"
@@ -182,16 +166,23 @@ ixgbe_add_tx_flow_control_drop_filter(struct rte_eth_dev *eth_dev)
 		return;
 	}
 
-	/* occupy an entity of ether type filter */
-	for (i = 0; i < IXGBE_MAX_ETQF_FILTERS; i++) {
-		if (!(filter_info->ethertype_mask & (1 << i))) {
-			filter_info->ethertype_mask |= 1 << i;
-			filter_info->ethertype_filters[i] =
-				IXGBE_ETHERTYPE_FLOW_CTRL;
-			break;
-		}
+	i = ixgbe_ethertype_filter_lookup(filter_info,
+					  IXGBE_ETHERTYPE_FLOW_CTRL);
+	if (i >= 0) {
+		RTE_LOG(ERR, PMD, "A ether type filter"
+			" entity for flow control already exists!\n");
+		return;
 	}
-	if (i == IXGBE_MAX_ETQF_FILTERS) {
+
+	ethertype_filter.ethertype = IXGBE_ETHERTYPE_FLOW_CTRL;
+	ethertype_filter.etqf = IXGBE_ETQF_FILTER_EN |
+				IXGBE_ETQF_TX_ANTISPOOF |
+				IXGBE_ETHERTYPE_FLOW_CTRL;
+	ethertype_filter.etqs = 0;
+	ethertype_filter.conf = TRUE;
+	i = ixgbe_ethertype_filter_insert(filter_info,
+					  &ethertype_filter);
+	if (i < 0) {
 		RTE_LOG(ERR, PMD, "Cannot find an unused ether type filter"
 			" entity for flow control.\n");
 		return;
@@ -262,7 +253,7 @@ int ixgbe_pf_host_configure(struct rte_eth_dev *eth_dev)
 
 	gpie = IXGBE_READ_REG(hw, IXGBE_GPIE);
 	gpie &= ~IXGBE_GPIE_VTMODE_MASK;
-	gpie |= IXGBE_GPIE_MSIX_MODE;
+	gpie |= IXGBE_GPIE_MSIX_MODE | IXGBE_GPIE_PBA_SUPPORT;
 
 	switch (RTE_ETH_DEV_SRIOV(eth_dev).active) {
 	case ETH_64_POOLS:
@@ -347,10 +338,7 @@ set_rx_mode(struct rte_eth_dev *dev)
 
 	IXGBE_WRITE_REG(hw, IXGBE_FCTRL, fctrl);
 
-	if (dev->data->dev_conf.rxmode.hw_vlan_strip)
-		ixgbe_vlan_hw_strip_enable_all(dev);
-	else
-		ixgbe_vlan_hw_strip_disable_all(dev);
+	ixgbe_vlan_hw_strip_config(dev);
 }
 
 static inline void
@@ -363,7 +351,7 @@ ixgbe_vf_reset_event(struct rte_eth_dev *dev, uint16_t vf)
 	int rar_entry = hw->mac.num_rar_entries - (vf + 1);
 	uint32_t vmolr = IXGBE_READ_REG(hw, IXGBE_VMOLR(vf));
 
-	vmolr |= (IXGBE_VMOLR_ROPE | IXGBE_VMOLR_ROMPE |
+	vmolr |= (IXGBE_VMOLR_ROPE |
 			IXGBE_VMOLR_BAM | IXGBE_VMOLR_AUPE);
 	IXGBE_WRITE_REG(hw, IXGBE_VMOLR(vf), vmolr);
 
@@ -386,15 +374,27 @@ ixgbe_vf_reset_msg(struct rte_eth_dev *dev, uint16_t vf)
 	uint32_t reg_offset, vf_shift;
 	const uint8_t VFRE_SHIFT = 5;  /* VFRE 32 bits per slot */
 	const uint8_t VFRE_MASK = (uint8_t)((1U << VFRE_SHIFT) - 1);
+	uint8_t  nb_q_per_pool;
+	int i;
 
 	vf_shift = vf & VFRE_MASK;
 	reg_offset = (vf >> VFRE_SHIFT) > 0 ? 1 : 0;
 
-	/* enable transmit and receive for vf */
+	/* enable transmit for vf */
 	reg = IXGBE_READ_REG(hw, IXGBE_VFTE(reg_offset));
 	reg |= (reg | (1 << vf_shift));
 	IXGBE_WRITE_REG(hw, IXGBE_VFTE(reg_offset), reg);
 
+	/* enable all queue drop for IOV */
+	nb_q_per_pool = RTE_ETH_DEV_SRIOV(dev).nb_q_per_pool;
+	for (i = vf * nb_q_per_pool; i < (vf + 1) * nb_q_per_pool; i++) {
+		IXGBE_WRITE_FLUSH(hw);
+		reg = IXGBE_QDE_ENABLE | IXGBE_QDE_WRITE;
+		reg |= i << IXGBE_QDE_IDX_SHIFT;
+		IXGBE_WRITE_REG(hw, IXGBE_QDE, reg);
+	}
+
+	/* enable receive for vf */
 	reg = IXGBE_READ_REG(hw, IXGBE_VFRE(reg_offset));
 	reg |= (reg | (1 << vf_shift));
 	IXGBE_WRITE_REG(hw, IXGBE_VFRE(reg_offset), reg);
@@ -488,7 +488,7 @@ ixgbe_vf_set_mac_addr(struct rte_eth_dev *dev, uint32_t vf, uint32_t *msgbuf)
 }
 
 static int
-ixgbe_vf_set_multicast(struct rte_eth_dev *dev, __rte_unused uint32_t vf, uint32_t *msgbuf)
+ixgbe_vf_set_multicast(struct rte_eth_dev *dev, uint32_t vf, uint32_t *msgbuf)
 {
 	struct ixgbe_hw *hw = IXGBE_DEV_PRIVATE_TO_HW(dev->data->dev_private);
 	struct ixgbe_vf_info *vfinfo =
@@ -503,6 +503,7 @@ ixgbe_vf_set_multicast(struct rte_eth_dev *dev, __rte_unused uint32_t vf, uint32
 	const uint32_t IXGBE_MTA_BIT_MASK = (0x1 << IXGBE_MTA_BIT_SHIFT) - 1;
 	uint32_t reg_val;
 	int i;
+	u32 vmolr = IXGBE_READ_REG(hw, IXGBE_VMOLR(vf));
 
 	/* Disable multicast promiscuous first */
 	ixgbe_disable_vf_mc_promisc(dev, vf);
@@ -516,6 +517,12 @@ ixgbe_vf_set_multicast(struct rte_eth_dev *dev, __rte_unused uint32_t vf, uint32
 		vfinfo->vf_mc_hashes[i] = hash_list[i];
 	}
 
+	if (nb_entries == 0) {
+		vmolr &= ~IXGBE_VMOLR_ROMPE;
+		IXGBE_WRITE_REG(hw, IXGBE_VMOLR(vf), vmolr);
+		return 0;
+	}
+
 	for (i = 0; i < vfinfo->num_vf_mc_hashes; i++) {
 		mta_idx = (vfinfo->vf_mc_hashes[i] >> IXGBE_MTA_BIT_SHIFT)
 				& IXGBE_MTA_INDEX_MASK;
@@ -524,6 +531,9 @@ ixgbe_vf_set_multicast(struct rte_eth_dev *dev, __rte_unused uint32_t vf, uint32
 		reg_val |= (1 << mta_shift);
 		IXGBE_WRITE_REG(hw, IXGBE_MTA(mta_idx), reg_val);
 	}
+
+	vmolr |= IXGBE_VMOLR_ROMPE;
+	IXGBE_WRITE_REG(hw, IXGBE_VMOLR(vf), vmolr);
 
 	return 0;
 }
@@ -604,6 +614,18 @@ ixgbe_get_vf_queues(struct rte_eth_dev *dev, uint32_t vf, uint32_t *msgbuf)
 	struct ixgbe_vf_info *vfinfo =
 		*IXGBE_DEV_PRIVATE_TO_P_VFDATA(dev->data->dev_private);
 	uint32_t default_q = vf * RTE_ETH_DEV_SRIOV(dev).nb_q_per_pool;
+	struct rte_eth_conf *eth_conf;
+	struct rte_eth_vmdq_dcb_tx_conf *vmdq_dcb_tx_conf;
+	u8 num_tcs;
+	struct ixgbe_hw *hw;
+	u32 vmvir;
+#define IXGBE_VMVIR_VLANA_MASK		0xC0000000
+#define IXGBE_VMVIR_VLAN_VID_MASK	0x00000FFF
+#define IXGBE_VMVIR_VLAN_UP_MASK	0x0000E000
+#define VLAN_PRIO_SHIFT			13
+	u32 vlana;
+	u32 vid;
+	u32 user_priority;
 
 	/* Verify if the PF supports the mbox APIs version or not */
 	switch (vfinfo[vf].api_version) {
@@ -622,10 +644,51 @@ ixgbe_get_vf_queues(struct rte_eth_dev *dev, uint32_t vf, uint32_t *msgbuf)
 	/* Notify VF of default queue */
 	msgbuf[IXGBE_VF_DEF_QUEUE] = default_q;
 
-	/*
-	 * FIX ME if it needs fill msgbuf[IXGBE_VF_TRANS_VLAN]
-	 * for VLAN strip or VMDQ_DCB or VMDQ_DCB_RSS
-	 */
+	/* Notify VF of number of DCB traffic classes */
+	eth_conf = &dev->data->dev_conf;
+	switch (eth_conf->txmode.mq_mode) {
+	case ETH_MQ_TX_NONE:
+	case ETH_MQ_TX_DCB:
+		RTE_LOG(ERR, PMD, "PF must work with virtualization for VF %u"
+			", but its tx mode = %d\n", vf,
+			eth_conf->txmode.mq_mode);
+		return -1;
+
+	case ETH_MQ_TX_VMDQ_DCB:
+		vmdq_dcb_tx_conf = &eth_conf->tx_adv_conf.vmdq_dcb_tx_conf;
+		switch (vmdq_dcb_tx_conf->nb_queue_pools) {
+		case ETH_16_POOLS:
+			num_tcs = ETH_8_TCS;
+			break;
+		case ETH_32_POOLS:
+			num_tcs = ETH_4_TCS;
+			break;
+		default:
+			return -1;
+		}
+		break;
+
+	/* ETH_MQ_TX_VMDQ_ONLY,  DCB not enabled */
+	case ETH_MQ_TX_VMDQ_ONLY:
+		hw = IXGBE_DEV_PRIVATE_TO_HW(dev->data->dev_private);
+		vmvir = IXGBE_READ_REG(hw, IXGBE_VMVIR(vf));
+		vlana = vmvir & IXGBE_VMVIR_VLANA_MASK;
+		vid = vmvir & IXGBE_VMVIR_VLAN_VID_MASK;
+		user_priority =
+			(vmvir & IXGBE_VMVIR_VLAN_UP_MASK) >> VLAN_PRIO_SHIFT;
+		if ((vlana == IXGBE_VMVIR_VLANA_DEFAULT) &&
+			((vid !=  0) || (user_priority != 0)))
+			num_tcs = 1;
+		else
+			num_tcs = 0;
+		break;
+
+	default:
+		RTE_LOG(ERR, PMD, "PF work with invalid mode = %d\n",
+			eth_conf->txmode.mq_mode);
+		return -1;
+	}
+	msgbuf[IXGBE_VF_TRANS_VLAN] = num_tcs;
 
 	return 0;
 }
@@ -660,6 +723,7 @@ ixgbe_rcv_msg_from_vf(struct rte_eth_dev *dev, uint16_t vf)
 	struct ixgbe_hw *hw = IXGBE_DEV_PRIVATE_TO_HW(dev->data->dev_private);
 	struct ixgbe_vf_info *vfinfo =
 		*IXGBE_DEV_PRIVATE_TO_P_VFDATA(dev->data->dev_private);
+	struct rte_pmd_ixgbe_mb_event_param ret_param;
 
 	retval = ixgbe_read_mbx(hw, msgbuf, mbx_size, vf);
 	if (retval) {
@@ -674,27 +738,56 @@ ixgbe_rcv_msg_from_vf(struct rte_eth_dev *dev, uint16_t vf)
 	/* flush the ack before we write any messages back */
 	IXGBE_WRITE_FLUSH(hw);
 
+	/**
+	 * initialise structure to send to user application
+	 * will return response from user in retval field
+	 */
+	ret_param.retval = RTE_PMD_IXGBE_MB_EVENT_PROCEED;
+	ret_param.vfid = vf;
+	ret_param.msg_type = msgbuf[0] & 0xFFFF;
+	ret_param.msg = (void *)msgbuf;
+
 	/* perform VF reset */
 	if (msgbuf[0] == IXGBE_VF_RESET) {
 		int ret = ixgbe_vf_reset(dev, vf, msgbuf);
 
 		vfinfo[vf].clear_to_send = true;
+
+		/* notify application about VF reset */
+		_rte_eth_dev_callback_process(dev, RTE_ETH_EVENT_VF_MBOX,
+					      &ret_param);
 		return ret;
 	}
+
+	/**
+	 * ask user application if we allowed to perform those functions
+	 * if we get ret_param.retval == RTE_PMD_IXGBE_MB_EVENT_PROCEED
+	 * then business as usual,
+	 * if 0, do nothing and send ACK to VF
+	 * if ret_param.retval > 1, do nothing and send NAK to VF
+	 */
+	_rte_eth_dev_callback_process(dev, RTE_ETH_EVENT_VF_MBOX,
+				      &ret_param);
+
+	retval = ret_param.retval;
 
 	/* check & process VF to PF mailbox message */
 	switch ((msgbuf[0] & 0xFFFF)) {
 	case IXGBE_VF_SET_MAC_ADDR:
-		retval = ixgbe_vf_set_mac_addr(dev, vf, msgbuf);
+		if (retval == RTE_PMD_IXGBE_MB_EVENT_PROCEED)
+			retval = ixgbe_vf_set_mac_addr(dev, vf, msgbuf);
 		break;
 	case IXGBE_VF_SET_MULTICAST:
-		retval = ixgbe_vf_set_multicast(dev, vf, msgbuf);
+		if (retval == RTE_PMD_IXGBE_MB_EVENT_PROCEED)
+			retval = ixgbe_vf_set_multicast(dev, vf, msgbuf);
 		break;
 	case IXGBE_VF_SET_LPE:
-		retval = ixgbe_set_vf_lpe(dev, vf, msgbuf);
+		if (retval == RTE_PMD_IXGBE_MB_EVENT_PROCEED)
+			retval = ixgbe_set_vf_lpe(dev, vf, msgbuf);
 		break;
 	case IXGBE_VF_SET_VLAN:
-		retval = ixgbe_vf_set_vlan(dev, vf, msgbuf);
+		if (retval == RTE_PMD_IXGBE_MB_EVENT_PROCEED)
+			retval = ixgbe_vf_set_vlan(dev, vf, msgbuf);
 		break;
 	case IXGBE_VF_API_NEGOTIATE:
 		retval = ixgbe_negotiate_vf_api(dev, vf, msgbuf);
@@ -704,7 +797,8 @@ ixgbe_rcv_msg_from_vf(struct rte_eth_dev *dev, uint16_t vf)
 		msg_size = IXGBE_VF_GET_QUEUE_MSG_SIZE;
 		break;
 	case IXGBE_VF_UPDATE_XCAST_MODE:
-		retval = ixgbe_set_vf_mc_promisc(dev, vf, msgbuf);
+		if (retval == RTE_PMD_IXGBE_MB_EVENT_PROCEED)
+			retval = ixgbe_set_vf_mc_promisc(dev, vf, msgbuf);
 		break;
 	default:
 		PMD_DRV_LOG(DEBUG, "Unhandled Msg %8.8x", (unsigned)msgbuf[0]);

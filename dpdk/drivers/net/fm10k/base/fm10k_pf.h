@@ -91,6 +91,8 @@ enum fm10k_pf_tlv_attr_id_v1 {
 #define FM10K_MSG_UPDATE_PVID_PVID_SHIFT	16
 #define FM10K_MSG_UPDATE_PVID_PVID_SIZE		16
 
+#define FM10K_MSG_ERR_PEP_NOT_SCHEDULED	280
+
 /* The following data structures are overlayed directly onto TLV mailbox
  * messages, and must not break 4 byte alignment. Ensure the structures line
  * up correctly as per their TLV definition.
@@ -182,4 +184,10 @@ extern const struct fm10k_msg_data fm10k_iov_msg_data_pf[];
 #endif
 
 s32 fm10k_init_ops_pf(struct fm10k_hw *hw);
+
+void fm10k_update_hw_stats_pf(struct fm10k_hw *hw,
+				     struct fm10k_hw_stats *stats);
+
+void fm10k_rebind_hw_stats_pf(struct fm10k_hw *hw,
+				     struct fm10k_hw_stats *stats);
 #endif /* _FM10K_PF_H */

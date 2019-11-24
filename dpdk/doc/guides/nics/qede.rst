@@ -1,40 +1,13 @@
-..  BSD LICENSE
-    Copyright (c) 2016 QLogic Corporation
-    All rights reserved.
-
-    Redistribution and use in source and binary forms, with or without
-    modification, are permitted provided that the following conditions
-    are met:
-
-    * Redistributions of source code must retain the above copyright
-    notice, this list of conditions and the following disclaimer.
-    * Redistributions in binary form must reproduce the above copyright
-    notice, this list of conditions and the following disclaimer in
-    the documentation and/or other materials provided with the
-    distribution.
-    * Neither the name of QLogic Corporation nor the names of its
-    contributors may be used to endorse or promote products derived
-    from this software without specific prior written permission.
-
-    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-    "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-    A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-    OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-    SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-    LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-    DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-    THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-    OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+..  SPDX-License-Identifier: BSD-3-Clause
+    Copyright(c) 2016 QLogic Corporation
+    Copyright(c) 2017 Cavium, Inc
 
 QEDE Poll Mode Driver
 ======================
 
 The QEDE poll mode driver library (**librte_pmd_qede**) implements support
-for **QLogic FastLinQ QL4xxxx 25G/40G CNA** family of adapters as well
-as their virtual functions (VF) in SR-IOV context. It is supported on
-several standard Linux distros like RHEL7.x, SLES12.x and Ubuntu.
+for **QLogic FastLinQ QL4xxxx 10G/25G/40G/50G/100G Intelligent Ethernet Adapters (IEA) and Converged Network Adapters (CNA)** family of adapters as well as SR-IOV virtual functions (VF). It is supported on
+several standard Linux distros like RHEL, SLES, Ubuntu etc.
 It is compile-tested under FreeBSD OS.
 
 More information can be found at `QLogic Corporation's Website
@@ -47,44 +20,84 @@ Supported Features
 - Promiscuous mode
 - Allmulti mode
 - Port hardware statistics
-- Jumbo frames (using single buffer)
-- VLAN offload - Filtering and stripping
-- Stateless checksum offloads (IPv4/TCP/UDP)
-- Multiple Rx/Tx queues (queue-pairs)
-- RSS (with user configurable table/key)
-- TSS
+- Jumbo frames
 - Multiple MAC address
+- MTU change
 - Default pause flow control
-- SR-IOV VF for 25G/40G modes
+- Multiprocess aware
+- Scatter-Gather
+- Multiple Rx/Tx queues
+- RSS (with RETA/hash table/key)
+- TSS
+- Stateless checksum offloads (IPv4/IPv6/TCP/UDP)
+- LRO/TSO
+- VLAN offload - Filtering and stripping
+- N-tuple filter and flow director (limited support)
+- NPAR (NIC Partitioning)
+- SR-IOV VF
+- GRE Tunneling offload
+- GENEVE Tunneling offload
+- VXLAN Tunneling offload
+- MPLSoUDP Tx Tunneling offload
 
 Non-supported Features
 ----------------------
 
-- Scatter-Gather Rx/Tx frames
-- Unequal number of Rx/Tx queues
-- MTU change (dynamic)
 - SR-IOV PF
-- Tunneling offloads
-- Reload of the PMD after a non-graceful termination
+
+Co-existence considerations
+---------------------------
+
+- QLogic FastLinQ QL4xxxx CNAs support Ethernet, RDMA, iSCSI and FCoE
+  functionalities. These functionalities are supported using
+  QLogic Linux kernel drivers qed, qede, qedr, qedi and qedf. DPDK is
+  supported on these adapters using qede PMD.
+
+- When SR-IOV is not enabled on the adapter,
+  QLogic Linux kernel drivers (qed, qede, qedr, qedi and qedf) and qede
+  PMD can’t be attached to different PFs on a given QLogic FastLinQ
+  QL4xxx adapter.
+  A given adapter needs to be completely used by DPDK or Linux drivers
+  Before binding DPDK driver to one or more PFs on the adapter,
+  please make sure to unbind Linux drivers from all PFs of the adapter.
+  If there are multiple adapters on the system, one or more adapters
+  can be used by DPDK driver completely and other adapters can be used
+  by Linux drivers completely.
+
+- When SR-IOV is enabled on the adapter,
+  Linux kernel drivers (qed, qede, qedr, qedi and qedf) can be bound
+  to the PFs of a given adapter and either qede PMD or Linux drivers
+  (qed and qede) can be bound to the VFs of the adapter.
 
 Supported QLogic Adapters
 -------------------------
 
-- QLogic FastLinQ QL4xxxx 25G/40G/100G CNAs.
+- QLogic FastLinQ QL4xxxx 10G/25G/40G/50G/100G Intelligent Ethernet Adapters (IEA) and Converged Network Adapters (CNA)
 
 Prerequisites
 -------------
 
-- Requires firmware version **8.7.x.** and management firmware
-  version **8.7.x or higher**. Firmware may be available
+- Requires storm firmware version **8.37.7.0**. Firmware may be available
   inbox in certain newer Linux distros under the standard directory
-  ``E.g. /lib/firmware/qed/qed_init_values_zipped-8.7.7.0.bin``
+  ``E.g. /lib/firmware/qed/qed_init_values-8.37.7.0.bin``.
+  If the required firmware files are not available then download it from
+  `linux-firmware git repository <http://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/tree/qed>`_
+  or `QLogic Driver Download Center <http://driverdownloads.qlogic.com/QLogicDriverDownloads_UI/DefaultNewSearch.aspx>`_.
+  To download firmware file from QLogic website, select adapter category, model and DPDK Poll Mode Driver.
 
-- If the required firmware files are not available then visit
-  `QLogic Driver Download Center <http://driverdownloads.qlogic.com>`_.
+- Requires the NIC be updated minimally with **8.30.x.x** Management firmware(MFW) version supported for that NIC.
+  It is highly recommended that the NIC be updated with the latest available management firmware version to get latest feature  set.
+  Management Firmware and Firmware Upgrade Utility for Cavium FastLinQ(r) branded adapters can be downloaded from
+  `Driver Download Center <http://driverdownloads.qlogic.com/QLogicDriverDownloads_UI/DefaultNewSearch.aspx>`_.
+  For downloading Firmware Upgrade Utility, select NIC category, model and Linux distro.
+  To update the management firmware, refer to the instructions in the Firmware Upgrade Utility Readme document.
+  For OEM branded adapters please follow the instruction provided by the OEM to update the Management Firmware on the NIC.
 
-- This driver relies on external zlib library (-lz) for uncompressing
-  the firmware file.
+- SR-IOV requires Linux PF driver version **8.20.x.x** or higher.
+  If the required PF driver is not available then download it from
+  `QLogic Driver Download Center <http://driverdownloads.qlogic.com/QLogicDriverDownloads_UI/DefaultNewSearch.aspx>`_.
+  For downloading PF driver, select adapter category, model and Linux distro.
+
 
 Performance note
 ~~~~~~~~~~~~~~~~
@@ -101,14 +114,6 @@ enabling debugging options may affect system performance.
 
   Toggle compilation of QEDE PMD driver.
 
-- ``CONFIG_RTE_LIBRTE_QEDE_DEBUG_INFO`` (default **n**)
-
-  Toggle display of generic debugging messages.
-
-- ``CONFIG_RTE_LIBRTE_QEDE_DEBUG_DRIVER`` (default **n**)
-
-  Toggle display of ecore related messages.
-
 - ``CONFIG_RTE_LIBRTE_QEDE_DEBUG_TX`` (default **n**)
 
   Toggle display of transmit fast path run-time messages.
@@ -120,130 +125,24 @@ enabling debugging options may affect system performance.
 - ``CONFIG_RTE_LIBRTE_QEDE_FW`` (default **""**)
 
   Gives absolute path of firmware file.
-  ``Eg: "/lib/firmware/qed/qed_init_values_zipped-8.7.7.0.bin"``
+  ``Eg: "/lib/firmware/qed/qed_init_values-8.37.7.0.bin"``
   Empty string indicates driver will pick up the firmware file
-  from the default location.
+  from the default location /lib/firmware/qed.
+  CAUTION this option is more for custom firmware, it is not
+  recommended for use under normal condition.
 
-Driver Compilation
-~~~~~~~~~~~~~~~~~~
+Driver compilation and testing
+------------------------------
 
-To compile QEDE PMD for Linux x86_64 gcc target, run the following ``make``
-command::
-
-   cd <DPDK-source-directory>
-   make config T=x86_64-native-linuxapp-gcc install
-
-To compile QEDE PMD for Linux x86_64 clang target, run the following ``make``
-command::
-
-   cd <DPDK-source-directory>
-   make config T=x86_64-native-linuxapp-clang install
-
-To compile QEDE PMD for FreeBSD x86_64 clang target, run the following ``gmake``
-command::
-
-   cd <DPDK-source-directory>
-   gmake config T=x86_64-native-bsdapp-clang install
-
-To compile QEDE PMD for FreeBSD x86_64 gcc target, run the following ``gmake``
-command::
-
-   cd <DPDK-source-directory>
-   gmake config T=x86_64-native-bsdapp-gcc install -Wl,-rpath=\
-                                        /usr/local/lib/gcc48 CC=gcc48
-
-
-Sample Application Notes
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-This section demonstrates how to launch ``testpmd`` with QLogic 4xxxx
-devices managed by ``librte_pmd_qede`` in Linux operating system.
-
-#. Request huge pages:
-
-   .. code-block:: console
-
-      echo 1024 > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages/ \
-                                                                nr_hugepages
-
-#. Load ``igb_uio`` driver:
-
-   .. code-block:: console
-
-      insmod ./x86_64-native-linuxapp-gcc/kmod/igb_uio.ko
-
-#. Bind the QLogic 4xxxx adapters to ``igb_uio`` loaded in the
-   previous step:
-
-   .. code-block:: console
-
-      ./tools/dpdk-devbind.py --bind igb_uio 0000:84:00.0 0000:84:00.1 \
-                                              0000:84:00.2 0000:84:00.3
-
-#. Start ``testpmd`` with basic parameters:
-   (Enable QEDE_DEBUG_INFO=y to view informational messages)
-
-   .. code-block:: console
-
-      testpmd -c 0xff1 -n 4 -- -i --nb-cores=8 --portmask=0xf --rxd=4096 \
-      --txd=4096 --txfreet=4068 --enable-rx-cksum --rxq=4 --txq=4 \
-      --rss-ip --rss-udp
-
-      [...]
-
-    EAL: PCI device 0000:84:00.0 on NUMA socket 1
-    EAL:   probe driver: 1077:1634 rte_qede_pmd
-    EAL:   Not managed by a supported kernel driver, skipped
-    EAL: PCI device 0000:84:00.1 on NUMA socket 1
-    EAL:   probe driver: 1077:1634 rte_qede_pmd
-    EAL:   Not managed by a supported kernel driver, skipped
-    EAL: PCI device 0000:88:00.0 on NUMA socket 1
-    EAL:   probe driver: 1077:1656 rte_qede_pmd
-    EAL:   PCI memory mapped at 0x7f738b200000
-    EAL:   PCI memory mapped at 0x7f738b280000
-    EAL:   PCI memory mapped at 0x7f738b300000
-    PMD: Chip details : BB1
-    PMD: Driver version : QEDE PMD 8.7.9.0_1.0.0
-    PMD: Firmware version : 8.7.7.0
-    PMD: Management firmware version : 8.7.8.0
-    PMD: Firmware file : /lib/firmware/qed/qed_init_values_zipped-8.7.7.0.bin
-    [QEDE PMD: (84:00.0:dpdk-port-0)]qede_common_dev_init:macaddr \
-                                                        00:0e:1e:d2:09:9c
-      [...]
-    [QEDE PMD: (84:00.0:dpdk-port-0)]qede_tx_queue_setup:txq 0 num_desc 4096 \
-                                                tx_free_thresh 4068 socket 0
-    [QEDE PMD: (84:00.0:dpdk-port-0)]qede_tx_queue_setup:txq 1 num_desc 4096 \
-                                                tx_free_thresh 4068 socket 0
-    [QEDE PMD: (84:00.0:dpdk-port-0)]qede_tx_queue_setup:txq 2 num_desc 4096 \
-                                                 tx_free_thresh 4068 socket 0
-    [QEDE PMD: (84:00.0:dpdk-port-0)]qede_tx_queue_setup:txq 3 num_desc 4096 \
-                                                 tx_free_thresh 4068 socket 0
-    [QEDE PMD: (84:00.0:dpdk-port-0)]qede_rx_queue_setup:rxq 0 num_desc 4096 \
-                                                rx_buf_size=2148 socket 0
-    [QEDE PMD: (84:00.0:dpdk-port-0)]qede_rx_queue_setup:rxq 1 num_desc 4096 \
-                                                rx_buf_size=2148 socket 0
-    [QEDE PMD: (84:00.0:dpdk-port-0)]qede_rx_queue_setup:rxq 2 num_desc 4096 \
-                                                rx_buf_size=2148 socket 0
-    [QEDE PMD: (84:00.0:dpdk-port-0)]qede_rx_queue_setup:rxq 3 num_desc 4096 \
-                                                rx_buf_size=2148 socket 0
-    [QEDE PMD: (84:00.0:dpdk-port-0)]qede_dev_start:port 0
-    [QEDE PMD: (84:00.0:dpdk-port-0)]qede_dev_start:link status: down
-      [...]
-    Checking link statuses...
-    Port 0 Link Up - speed 25000 Mbps - full-duplex
-    Port 1 Link Up - speed 25000 Mbps - full-duplex
-    Port 2 Link Up - speed 25000 Mbps - full-duplex
-    Port 3 Link Up - speed 25000 Mbps - full-duplex
-    Done
-    testpmd>
-
+Refer to the document :ref:`compiling and testing a PMD for a NIC <pmd_build_and_test>`
+for details.
 
 SR-IOV: Prerequisites and Sample Application Notes
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+--------------------------------------------------
 
 This section provides instructions to configure SR-IOV with Linux OS.
 
-**Note**: librte_pmd_qede will be used to bind to SR-IOV VF device and Linux native kernel driver (QEDE) will function as SR-IOV PF driver.
+**Note**: librte_pmd_qede will be used to bind to SR-IOV VF device and Linux native kernel driver (qede) will function as SR-IOV PF driver. Requires PF driver to be 8.20.x.x or higher.
 
 #. Verify SR-IOV and ARI capability is enabled on the adapter using ``lspci``:
 
@@ -311,4 +210,68 @@ This section provides instructions to configure SR-IOV with Linux OS.
 
    The VF devices may be passed through to the guest VM using ``virt-manager`` or
    ``virsh``. QEDE PMD should be used to bind the VF devices in the guest VM
-   using the instructions outlined in the Application notes above.
+   using the instructions from Driver compilation and testing section above.
+
+
+#. Running testpmd
+   (Supply ``--log-level="pmd.net.qede.driver:info`` to view informational messages):
+
+   Refer to the document
+   :ref:`compiling and testing a PMD for a NIC <pmd_build_and_test>` to run
+   ``testpmd`` application.
+
+   Example output:
+
+   .. code-block:: console
+
+      testpmd -l 0,4-11 -n 4 -- -i --nb-cores=8 --portmask=0xf --rxd=4096 \
+      --txd=4096 --txfreet=4068 --enable-rx-cksum --rxq=4 --txq=4 \
+      --rss-ip --rss-udp
+
+      [...]
+
+    EAL: PCI device 0000:84:00.0 on NUMA socket 1
+    EAL:   probe driver: 1077:1634 rte_qede_pmd
+    EAL:   Not managed by a supported kernel driver, skipped
+    EAL: PCI device 0000:84:00.1 on NUMA socket 1
+    EAL:   probe driver: 1077:1634 rte_qede_pmd
+    EAL:   Not managed by a supported kernel driver, skipped
+    EAL: PCI device 0000:88:00.0 on NUMA socket 1
+    EAL:   probe driver: 1077:1656 rte_qede_pmd
+    EAL:   PCI memory mapped at 0x7f738b200000
+    EAL:   PCI memory mapped at 0x7f738b280000
+    EAL:   PCI memory mapped at 0x7f738b300000
+    PMD: Chip details : BB1
+    PMD: Driver version : QEDE PMD 8.7.9.0_1.0.0
+    PMD: Firmware version : 8.7.7.0
+    PMD: Management firmware version : 8.7.8.0
+    PMD: Firmware file : /lib/firmware/qed/qed_init_values_zipped-8.7.7.0.bin
+    [QEDE PMD: (84:00.0:dpdk-port-0)]qede_common_dev_init:macaddr \
+                                                        00:0e:1e:d2:09:9c
+      [...]
+    [QEDE PMD: (84:00.0:dpdk-port-0)]qede_tx_queue_setup:txq 0 num_desc 4096 \
+                                                tx_free_thresh 4068 socket 0
+    [QEDE PMD: (84:00.0:dpdk-port-0)]qede_tx_queue_setup:txq 1 num_desc 4096 \
+                                                tx_free_thresh 4068 socket 0
+    [QEDE PMD: (84:00.0:dpdk-port-0)]qede_tx_queue_setup:txq 2 num_desc 4096 \
+                                                 tx_free_thresh 4068 socket 0
+    [QEDE PMD: (84:00.0:dpdk-port-0)]qede_tx_queue_setup:txq 3 num_desc 4096 \
+                                                 tx_free_thresh 4068 socket 0
+    [QEDE PMD: (84:00.0:dpdk-port-0)]qede_rx_queue_setup:rxq 0 num_desc 4096 \
+                                                rx_buf_size=2148 socket 0
+    [QEDE PMD: (84:00.0:dpdk-port-0)]qede_rx_queue_setup:rxq 1 num_desc 4096 \
+                                                rx_buf_size=2148 socket 0
+    [QEDE PMD: (84:00.0:dpdk-port-0)]qede_rx_queue_setup:rxq 2 num_desc 4096 \
+                                                rx_buf_size=2148 socket 0
+    [QEDE PMD: (84:00.0:dpdk-port-0)]qede_rx_queue_setup:rxq 3 num_desc 4096 \
+                                                rx_buf_size=2148 socket 0
+    [QEDE PMD: (84:00.0:dpdk-port-0)]qede_dev_start:port 0
+    [QEDE PMD: (84:00.0:dpdk-port-0)]qede_dev_start:link status: down
+      [...]
+    Checking link statuses...
+    Port 0 Link Up - speed 25000 Mbps - full-duplex
+    Port 1 Link Up - speed 25000 Mbps - full-duplex
+    Port 2 Link Up - speed 25000 Mbps - full-duplex
+    Port 3 Link Up - speed 25000 Mbps - full-duplex
+    Done
+    testpmd>

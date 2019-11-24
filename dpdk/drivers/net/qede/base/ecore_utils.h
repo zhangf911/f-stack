@@ -1,15 +1,19 @@
-/*
- * Copyright (c) 2016 QLogic Corporation.
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2016 - 2018 Cavium Inc.
  * All rights reserved.
- * www.qlogic.com
- *
- * See LICENSE.qede_pmd for copyright and licensing details.
+ * www.cavium.com
  */
 
 #ifndef __ECORE_UTILS_H__
 #define __ECORE_UTILS_H__
 
 /* dma_addr_t manip */
+/* Suppress "right shift count >= width of type" warning when that quantity is
+ * 32-bits rquires the >> 16) >> 16)
+ */
+#define PTR_LO(x)		((u32)(((osal_uintptr_t)(x)) & 0xffffffff))
+#define PTR_HI(x)		((u32)((((osal_uintptr_t)(x)) >> 16) >> 16))
+
 #define DMA_LO(x)		((u32)(((dma_addr_t)(x)) & 0xffffffff))
 #define DMA_HI(x)		((u32)(((dma_addr_t)(x)) >> 32))
 

@@ -32,14 +32,13 @@
  */
 
 #include <rte_mbuf.h>
-#include <rte_ethdev.h>
+#include <rte_ethdev_driver.h>
+#include <rte_ethdev_vdev.h>
 #include <rte_malloc.h>
 #include <rte_memcpy.h>
-#include <rte_dev.h>
+#include <rte_bus_vdev.h>
 #include <rte_kvargs.h>
 #include <rte_spinlock.h>
-
-#include "rte_eth_null.h"
 
 #define ETH_NULL_PACKET_SIZE_ARG	"size"
 #define ETH_NULL_PACKET_COPY_ARG	"copy"
@@ -69,11 +68,12 @@ struct null_queue {
 struct pmd_internals {
 	unsigned packet_size;
 	unsigned packet_copy;
-	uint8_t port_id;
+	uint16_t port_id;
 
 	struct null_queue rx_null_queues[RTE_MAX_QUEUES_PER_PORT];
 	struct null_queue tx_null_queues[RTE_MAX_QUEUES_PER_PORT];
 
+	struct ether_addr eth_addr;
 	/** Bit mask of RSS offloads, the bit offset also means flow type */
 	uint64_t flow_type_rss_offloads;
 
@@ -85,16 +85,18 @@ struct pmd_internals {
 
 	uint8_t rss_key[40];                /**< 40-byte hash key. */
 };
-
-
-static struct ether_addr eth_addr = { .addr_bytes = {0} };
-static const char *drivername = "Null PMD";
 static struct rte_eth_link pmd_link = {
 	.link_speed = ETH_SPEED_NUM_10G,
 	.link_duplex = ETH_LINK_FULL_DUPLEX,
 	.link_status = ETH_LINK_DOWN,
-	.link_autoneg = ETH_LINK_SPEED_AUTONEG,
+	.link_autoneg = ETH_LINK_FIXED,
 };
+
+static int eth_null_logtype;
+
+#define PMD_LOG(level, fmt, args...) \
+	rte_log(RTE_LOG_ ## level, eth_null_logtype, \
+		"%s(): " fmt "\n", __func__, ##args)
 
 static uint16_t
 eth_null_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
@@ -107,14 +109,12 @@ eth_null_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 		return 0;
 
 	packet_size = h->internals->packet_size;
+	if (rte_pktmbuf_alloc_bulk(h->mb_pool, bufs, nb_bufs) != 0)
+		return 0;
+
 	for (i = 0; i < nb_bufs; i++) {
-		bufs[i] = rte_pktmbuf_alloc(h->mb_pool);
-		if (!bufs[i])
-			break;
 		bufs[i]->data_len = (uint16_t)packet_size;
 		bufs[i]->pkt_len = packet_size;
-		bufs[i]->nb_segs = 1;
-		bufs[i]->next = NULL;
 		bufs[i]->port = h->internals->port_id;
 	}
 
@@ -134,16 +134,14 @@ eth_null_copy_rx(void *q, struct rte_mbuf **bufs, uint16_t nb_bufs)
 		return 0;
 
 	packet_size = h->internals->packet_size;
+	if (rte_pktmbuf_alloc_bulk(h->mb_pool, bufs, nb_bufs) != 0)
+		return 0;
+
 	for (i = 0; i < nb_bufs; i++) {
-		bufs[i] = rte_pktmbuf_alloc(h->mb_pool);
-		if (!bufs[i])
-			break;
 		rte_memcpy(rte_pktmbuf_mtod(bufs[i], void *), h->dummy_packet,
 					packet_size);
 		bufs[i]->data_len = (uint16_t)packet_size;
 		bufs[i]->pkt_len = packet_size;
-		bufs[i]->nb_segs = 1;
-		bufs[i]->next = NULL;
 		bufs[i]->port = h->internals->port_id;
 	}
 
@@ -284,6 +282,11 @@ eth_tx_queue_setup(struct rte_eth_dev *dev, uint16_t tx_queue_id,
 	return 0;
 }
 
+static int
+eth_mtu_set(struct rte_eth_dev *dev __rte_unused, uint16_t mtu __rte_unused)
+{
+	return 0;
+}
 
 static void
 eth_dev_info(struct rte_eth_dev *dev,
@@ -295,18 +298,16 @@ eth_dev_info(struct rte_eth_dev *dev,
 		return;
 
 	internals = dev->data->dev_private;
-	dev_info->driver_name = drivername;
 	dev_info->max_mac_addrs = 1;
 	dev_info->max_rx_pktlen = (uint32_t)-1;
 	dev_info->max_rx_queues = RTE_DIM(internals->rx_null_queues);
 	dev_info->max_tx_queues = RTE_DIM(internals->tx_null_queues);
 	dev_info->min_rx_bufsize = 0;
-	dev_info->pci_dev = NULL;
 	dev_info->reta_size = internals->reta_size;
 	dev_info->flow_type_rss_offloads = internals->flow_type_rss_offloads;
 }
 
-static void
+static int
 eth_stats_get(struct rte_eth_dev *dev, struct rte_eth_stats *igb_stats)
 {
 	unsigned i, num_stats;
@@ -314,7 +315,7 @@ eth_stats_get(struct rte_eth_dev *dev, struct rte_eth_stats *igb_stats)
 	const struct pmd_internals *internal;
 
 	if ((dev == NULL) || (igb_stats == NULL))
-		return;
+		return -EINVAL;
 
 	internal = dev->data->dev_private;
 	num_stats = RTE_MIN((unsigned)RTE_ETHDEV_QUEUE_STAT_CNTRS,
@@ -341,6 +342,8 @@ eth_stats_get(struct rte_eth_dev *dev, struct rte_eth_stats *igb_stats)
 	igb_stats->ipackets = rx_total;
 	igb_stats->opackets = tx_total;
 	igb_stats->oerrors = tx_err_total;
+
+	return 0;
 }
 
 static void
@@ -462,6 +465,13 @@ eth_rss_hash_conf_get(struct rte_eth_dev *dev,
 	return 0;
 }
 
+static int
+eth_mac_address_set(__rte_unused struct rte_eth_dev *dev,
+		    __rte_unused struct ether_addr *addr)
+{
+	return 0;
+}
+
 static const struct eth_dev_ops ops = {
 	.dev_start = eth_dev_start,
 	.dev_stop = eth_dev_stop,
@@ -471,7 +481,9 @@ static const struct eth_dev_ops ops = {
 	.tx_queue_setup = eth_tx_queue_setup,
 	.rx_queue_release = eth_queue_release,
 	.tx_queue_release = eth_queue_release,
+	.mtu_set = eth_mtu_set,
 	.link_update = eth_link_update,
+	.mac_addr_set = eth_mac_address_set,
 	.stats_get = eth_stats_get,
 	.stats_reset = eth_stats_reset,
 	.reta_update = eth_rss_reta_update,
@@ -480,15 +492,14 @@ static const struct eth_dev_ops ops = {
 	.rss_hash_conf_get = eth_rss_hash_conf_get
 };
 
-int
-eth_dev_null_create(const char *name,
-		const unsigned numa_node,
+static int
+eth_dev_null_create(struct rte_vdev_device *dev,
 		unsigned packet_size,
 		unsigned packet_copy)
 {
 	const unsigned nb_rx_queues = 1;
 	const unsigned nb_tx_queues = 1;
-	struct rte_eth_dev_data *data = NULL;
+	struct rte_eth_dev_data *data;
 	struct pmd_internals *internals = NULL;
 	struct rte_eth_dev *eth_dev = NULL;
 
@@ -499,27 +510,15 @@ eth_dev_null_create(const char *name,
 		0xBE, 0xAC, 0x01, 0xFA
 	};
 
-	if (name == NULL)
-		return -EINVAL;
+	if (dev->device.numa_node == SOCKET_ID_ANY)
+		dev->device.numa_node = rte_socket_id();
 
-	RTE_LOG(INFO, PMD, "Creating null ethdev on numa socket %u\n",
-			numa_node);
+	PMD_LOG(INFO, "Creating null ethdev on numa socket %u",
+		dev->device.numa_node);
 
-	/* now do all data allocation - for eth_dev structure, dummy pci driver
-	 * and internal (private) data
-	 */
-	data = rte_zmalloc_socket(name, sizeof(*data), 0, numa_node);
-	if (data == NULL)
-		goto error;
-
-	internals = rte_zmalloc_socket(name, sizeof(*internals), 0, numa_node);
-	if (internals == NULL)
-		goto error;
-
-	/* reserve an ethdev entry */
-	eth_dev = rte_eth_dev_allocate(name, RTE_ETH_DEV_VIRTUAL);
-	if (eth_dev == NULL)
-		goto error;
+	eth_dev = rte_eth_vdev_allocate(dev, sizeof(*internals));
+	if (!eth_dev)
+		return -ENOMEM;
 
 	/* now put it all together
 	 * - store queue data in internals,
@@ -530,33 +529,24 @@ eth_dev_null_create(const char *name,
 	/* NOTE: we'll replace the data element, of originally allocated eth_dev
 	 * so the nulls are local per-process */
 
+	internals = eth_dev->data->dev_private;
 	internals->packet_size = packet_size;
 	internals->packet_copy = packet_copy;
 	internals->port_id = eth_dev->data->port_id;
+	eth_random_addr(internals->eth_addr.addr_bytes);
 
 	internals->flow_type_rss_offloads =  ETH_RSS_PROTO_MASK;
 	internals->reta_size = RTE_DIM(internals->reta_conf) * RTE_RETA_GROUP_SIZE;
 
 	rte_memcpy(internals->rss_key, default_rss_key, 40);
 
-	data->dev_private = internals;
-	data->port_id = eth_dev->data->port_id;
+	data = eth_dev->data;
 	data->nb_rx_queues = (uint16_t)nb_rx_queues;
 	data->nb_tx_queues = (uint16_t)nb_tx_queues;
 	data->dev_link = pmd_link;
-	data->mac_addrs = &eth_addr;
-	strncpy(data->name, eth_dev->data->name, strlen(eth_dev->data->name));
+	data->mac_addrs = &internals->eth_addr;
 
-	eth_dev->data = data;
 	eth_dev->dev_ops = &ops;
-
-	TAILQ_INIT(&eth_dev->link_intr_cbs);
-
-	eth_dev->driver = NULL;
-	data->dev_flags = RTE_ETH_DEV_DETACHABLE;
-	data->kdrv = RTE_KDRV_NONE;
-	data->drv_name = drivername;
-	data->numa_node = numa_node;
 
 	/* finally assign rx and tx ops */
 	if (packet_copy) {
@@ -567,13 +557,8 @@ eth_dev_null_create(const char *name,
 		eth_dev->tx_pkt_burst = eth_null_tx;
 	}
 
+	rte_eth_dev_probing_finish(eth_dev);
 	return 0;
-
-error:
-	rte_free(data);
-	rte_free(internals);
-
-	return -1;
 }
 
 static inline int
@@ -611,20 +596,34 @@ get_packet_copy_arg(const char *key __rte_unused,
 }
 
 static int
-rte_pmd_null_devinit(const char *name, const char *params)
+rte_pmd_null_probe(struct rte_vdev_device *dev)
 {
-	unsigned numa_node;
+	const char *name, *params;
 	unsigned packet_size = default_packet_size;
 	unsigned packet_copy = default_packet_copy;
 	struct rte_kvargs *kvlist = NULL;
+	struct rte_eth_dev *eth_dev;
 	int ret;
 
-	if (name == NULL)
+	if (!dev)
 		return -EINVAL;
 
-	RTE_LOG(INFO, PMD, "Initializing pmd_null for %s\n", name);
+	name = rte_vdev_device_name(dev);
+	params = rte_vdev_device_args(dev);
+	PMD_LOG(INFO, "Initializing pmd_null for %s", name);
 
-	numa_node = rte_socket_id();
+	if (rte_eal_process_type() == RTE_PROC_SECONDARY) {
+		eth_dev = rte_eth_dev_attach_secondary(name);
+		if (!eth_dev) {
+			PMD_LOG(ERR, "Failed to probe %s", name);
+			return -1;
+		}
+		/* TODO: request info from primary to set up Rx and Tx */
+		eth_dev->dev_ops = &ops;
+		eth_dev->device = &dev->device;
+		rte_eth_dev_probing_finish(eth_dev);
+		return 0;
+	}
 
 	if (params != NULL) {
 		kvlist = rte_kvargs_parse(params, valid_arguments);
@@ -650,11 +649,11 @@ rte_pmd_null_devinit(const char *name, const char *params)
 		}
 	}
 
-	RTE_LOG(INFO, PMD, "Configure pmd_null: packet size is %d, "
-			"packet copy is %s\n", packet_size,
+	PMD_LOG(INFO, "Configure pmd_null: packet size is %d, "
+			"packet copy is %s", packet_size,
 			packet_copy ? "enabled" : "disabled");
 
-	ret = eth_dev_null_create(name, numa_node, packet_size, packet_copy);
+	ret = eth_dev_null_create(dev, packet_size, packet_copy);
 
 free_kvlist:
 	if (kvlist)
@@ -663,36 +662,44 @@ free_kvlist:
 }
 
 static int
-rte_pmd_null_devuninit(const char *name)
+rte_pmd_null_remove(struct rte_vdev_device *dev)
 {
 	struct rte_eth_dev *eth_dev = NULL;
 
-	if (name == NULL)
+	if (!dev)
 		return -EINVAL;
 
-	RTE_LOG(INFO, PMD, "Closing null ethdev on numa socket %u\n",
+	PMD_LOG(INFO, "Closing null ethdev on numa socket %u",
 			rte_socket_id());
 
 	/* find the ethdev entry */
-	eth_dev = rte_eth_dev_allocated(name);
+	eth_dev = rte_eth_dev_allocated(rte_vdev_device_name(dev));
 	if (eth_dev == NULL)
 		return -1;
 
-	rte_free(eth_dev->data->dev_private);
-	rte_free(eth_dev->data);
+	if (rte_eal_process_type() == RTE_PROC_PRIMARY)
+		/* mac_addrs must not be freed alone because part of dev_private */
+		eth_dev->data->mac_addrs = NULL;
 
 	rte_eth_dev_release_port(eth_dev);
 
 	return 0;
 }
 
-static struct rte_driver pmd_null_drv = {
-	.type = PMD_VDEV,
-	.init = rte_pmd_null_devinit,
-	.uninit = rte_pmd_null_devuninit,
+static struct rte_vdev_driver pmd_null_drv = {
+	.probe = rte_pmd_null_probe,
+	.remove = rte_pmd_null_remove,
 };
 
-PMD_REGISTER_DRIVER(pmd_null_drv, eth_null);
-DRIVER_REGISTER_PARAM_STRING(eth_null,
+RTE_PMD_REGISTER_VDEV(net_null, pmd_null_drv);
+RTE_PMD_REGISTER_ALIAS(net_null, eth_null);
+RTE_PMD_REGISTER_PARAM_STRING(net_null,
 	"size=<int> "
 	"copy=<int>");
+
+RTE_INIT(eth_null_init_log)
+{
+	eth_null_logtype = rte_log_register("pmd.net.null");
+	if (eth_null_logtype >= 0)
+		rte_log_set_level(eth_null_logtype, RTE_LOG_NOTICE);
+}

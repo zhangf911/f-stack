@@ -1,34 +1,5 @@
-/*-
- *   BSD LICENSE
- *
- *   Copyright(c) 2010-2014 Intel Corporation. All rights reserved.
- *   All rights reserved.
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *     * Neither the name of Intel Corporation nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- *   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright(c) 2010-2014 Intel Corporation
  */
 
 #ifndef _RTE_LPM_H_
@@ -45,6 +16,7 @@
 #include <stdlib.h>
 #include <rte_branch_prediction.h>
 #include <rte_byteorder.h>
+#include <rte_config.h>
 #include <rte_memory.h>
 #include <rte_common.h>
 #include <rte_vect.h>
@@ -93,12 +65,14 @@ extern "C" {
 
 #if RTE_BYTE_ORDER == RTE_LITTLE_ENDIAN
 /** @internal Tbl24 entry structure. */
+__extension__
 struct rte_lpm_tbl_entry_v20 {
 	/**
 	 * Stores Next hop (tbl8 or tbl24 when valid_group is not set) or
 	 * a group index pointing to a tbl8 structure (tbl24 only, when
 	 * valid_group is set)
 	 */
+	RTE_STD_C11
 	union {
 		uint8_t next_hop;
 		uint8_t group_idx;
@@ -116,6 +90,7 @@ struct rte_lpm_tbl_entry_v20 {
 	uint8_t depth       :6; /**< Rule depth. */
 };
 
+__extension__
 struct rte_lpm_tbl_entry {
 	/**
 	 * Stores Next hop (tbl8 or tbl24 when valid_group is not set) or
@@ -137,6 +112,7 @@ struct rte_lpm_tbl_entry {
 };
 
 #else
+__extension__
 struct rte_lpm_tbl_entry_v20 {
 	uint8_t depth       :6;
 	uint8_t valid_group :1;
@@ -147,6 +123,7 @@ struct rte_lpm_tbl_entry_v20 {
 	};
 };
 
+__extension__
 struct rte_lpm_tbl_entry {
 	uint32_t depth       :6;
 	uint32_t valid_group :1;
@@ -193,7 +170,7 @@ struct rte_lpm_v20 {
 			__rte_cache_aligned; /**< LPM tbl24 table. */
 	struct rte_lpm_tbl_entry_v20 tbl8[RTE_LPM_TBL8_NUM_ENTRIES]
 			__rte_cache_aligned; /**< LPM tbl8 table. */
-	struct rte_lpm_rule_v20 rules_tbl[0] \
+	struct rte_lpm_rule_v20 rules_tbl[]
 			__rte_cache_aligned; /**< LPM rules. */
 };
 
@@ -465,7 +442,7 @@ rte_lpm_lookup_bulk_func(const struct rte_lpm *lpm, const uint32_t *ips,
  * @param hop
  *   Next hop of the most specific rule found for IP (valid on lookup hit only).
  *   This is an 4 elements array of two byte values.
- *   If the lookup was succesfull for the given IP, then least significant byte
+ *   If the lookup was successful for the given IP, then least significant byte
  *   of the corresponding element is the  actual next hop and the most
  *   significant byte is zero.
  *   If the lookup for the given IP failed, then corresponding element would
@@ -480,6 +457,8 @@ rte_lpm_lookupx4(const struct rte_lpm *lpm, xmm_t ip, uint32_t hop[4],
 
 #if defined(RTE_ARCH_ARM) || defined(RTE_ARCH_ARM64)
 #include "rte_lpm_neon.h"
+#elif defined(RTE_ARCH_PPC_64)
+#include "rte_lpm_altivec.h"
 #else
 #include "rte_lpm_sse.h"
 #endif

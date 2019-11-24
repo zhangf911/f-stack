@@ -50,6 +50,10 @@
 #include <sys/filio.h>
 #include <sys/sysproto.h>
 #include <sys/fcntl.h>
+#include <net/route.h>
+
+#include <net/if.h>
+#include <sys/sockio.h>
 
 #include <machine/stdarg.h>
 
@@ -70,6 +74,7 @@
 #define LINUX_SO_KEEPALIVE    9
 #define LINUX_SO_OOBINLINE    10
 #define LINUX_SO_LINGER       13
+#define LINUX_SO_REUSEPORT    15
 #define LINUX_SO_RCVLOWAT     18
 #define LINUX_SO_SNDLOWAT     19
 #define LINUX_SO_RCVTIMEO     20
@@ -94,6 +99,7 @@
 #define LINUX_TCP_KEEPIDLE    4
 #define LINUX_TCP_KEEPINTVL   5
 #define LINUX_TCP_KEEPCNT     6
+#define LINUX_TCP_INFO        11
 #define LINUX_TCP_MD5SIG      14
 
 /* setsockopt/getsockopt define end */
@@ -138,6 +144,27 @@
 #define LINUX_TIOCPKT_NOSTOP        16
 #define LINUX_TIOCPKT_DOSTOP        32
 #define LINUX_TIOCPKT_IOCTL         64
+
+#define LINUX_SIOCGIFCONF     0x8912
+#define LINUX_SIOCGIFFLAGS    0x8913
+#define LINUX_SIOCSIFFLAGS    0x8914
+#define LINUX_SIOCGIFADDR     0x8915
+#define LINUX_SIOCSIFADDR     0x8916
+#define LINUX_SIOCGIFDSTADDR  0x8917
+#define LINUX_SIOCSIFDSTADDR  0x8918
+#define LINUX_SIOCGIFBRDADDR  0x8919
+#define LINUX_SIOCSIFBRDADDR  0x891a
+#define LINUX_SIOCGIFNETMASK  0x891b
+#define LINUX_SIOCSIFNETMASK  0x891c
+#define LINUX_SIOCGIFMETRIC   0x891d
+#define LINUX_SIOCSIFMETRIC   0x891e
+#define LINUX_SIOCGIFMTU      0x8921
+#define LINUX_SIOCSIFMTU      0x8922
+#define LINUX_SIOCSIFNAME     0x8923
+#define LINUX_SIOCADDMULTI    0x8931
+#define LINUX_SIOCDELMULTI    0x8932
+#define LINUX_SIOCGIFINDEX    0x8933
+#define LINUX_SIOCDIFADDR     0x8936
 
 /* ioctl define end */
 
@@ -216,8 +243,48 @@ linux2freebsd_ioctl(unsigned long request)
             return TIOCPKT_DOSTOP;
         case LINUX_TIOCPKT_IOCTL:
             return TIOCPKT_IOCTL;
+        case LINUX_SIOCGIFCONF:
+            return SIOCGIFCONF;
+        case LINUX_SIOCGIFFLAGS:
+            return SIOCGIFFLAGS;
+        case LINUX_SIOCSIFFLAGS:
+            return SIOCSIFFLAGS;
+        case LINUX_SIOCGIFADDR:
+            return SIOCGIFADDR;
+        case LINUX_SIOCSIFADDR:
+            return SIOCSIFADDR;
+        case LINUX_SIOCGIFDSTADDR:
+            return SIOCGIFDSTADDR;
+        case LINUX_SIOCSIFDSTADDR:
+            return SIOCSIFDSTADDR;
+        case LINUX_SIOCGIFBRDADDR:
+            return SIOCGIFBRDADDR;
+        case LINUX_SIOCSIFBRDADDR:
+            return SIOCSIFBRDADDR;
+        case LINUX_SIOCGIFNETMASK:
+            return SIOCGIFNETMASK;
+        case LINUX_SIOCSIFNETMASK:
+            return SIOCSIFNETMASK;
+        case LINUX_SIOCGIFMETRIC:
+            return SIOCGIFMETRIC;
+        case LINUX_SIOCSIFMETRIC:
+            return SIOCSIFMETRIC;
+        case LINUX_SIOCGIFMTU:
+            return SIOCGIFMTU;
+        case LINUX_SIOCSIFMTU:
+            return SIOCSIFMTU;
+        case LINUX_SIOCSIFNAME:
+            return SIOCSIFNAME;
+        case LINUX_SIOCADDMULTI:
+            return SIOCADDMULTI;
+        case LINUX_SIOCDELMULTI:
+            return SIOCDELMULTI;
+        case LINUX_SIOCGIFINDEX:
+            return SIOCGIFINDEX;
+        case LINUX_SIOCDIFADDR:
+            return SIOCDIFADDR;
         default:
-            return (-1);
+            return -1;
     }
 }
 
@@ -245,6 +312,8 @@ so_opt_convert(int optname)
             return SO_OOBINLINE;
         case LINUX_SO_LINGER:
             return SO_LINGER;
+        case LINUX_SO_REUSEPORT:
+            return SO_REUSEPORT;
         case LINUX_SO_RCVLOWAT:
             return SO_RCVLOWAT;
         case LINUX_SO_SNDLOWAT:
@@ -258,7 +327,7 @@ so_opt_convert(int optname)
         case LINUX_SO_PROTOCOL:
             return SO_PROTOCOL;
         default:
-            return (-1);
+            return -1;
     }
 }
 
@@ -285,7 +354,7 @@ ip_opt_convert(int optname)
         case LINUX_IP_DROP_MEMBERSHIP:
             return IP_DROP_MEMBERSHIP;
         default:
-            return (-1);
+            return -1;
     }
 }
 
@@ -303,10 +372,12 @@ tcp_opt_convert(int optname)
             return TCP_KEEPINTVL;
         case LINUX_TCP_KEEPCNT:
             return TCP_KEEPCNT;
+        case LINUX_TCP_INFO:
+            return TCP_INFO;
         case LINUX_TCP_MD5SIG:
             return TCP_MD5SIG;
         default:
-            return (-1);
+            return -1;
     }
 }
 
@@ -321,7 +392,7 @@ linux2freebsd_opt(int level, int optname)
         case IPPROTO_TCP:
             return tcp_opt_convert(optname);
         default:
-            return (-1);
+            return -1;
     }
 }
 
@@ -333,10 +404,11 @@ linux2freebsd_sockaddr(const struct linux_sockaddr *linux,
         return;
     }
 
-    bzero(freebsd, sizeof(struct sockaddr));
-    freebsd->sa_len = addrlen;
+    /* #linux and #freebsd may point to the same address */
     freebsd->sa_family = linux->sa_family;
-    bcopy(linux->sa_data, freebsd->sa_data, sizeof(linux->sa_data));
+    freebsd->sa_len = addrlen;
+
+    bcopy(linux->sa_data, freebsd->sa_data, addrlen - sizeof(linux->sa_family));
 }
 
 static void
@@ -348,7 +420,8 @@ freebsd2linux_sockaddr(struct linux_sockaddr *linux,
     }
 
     linux->sa_family = freebsd->sa_family;
-    bcopy(freebsd->sa_data, linux->sa_data, sizeof(freebsd->sa_data));
+
+    bcopy(freebsd->sa_data, linux->sa_data, freebsd->sa_len - sizeof(linux->sa_family));
 }
 
 int
@@ -382,8 +455,25 @@ ff_getsockopt(int s, int level, int optname, void *optval,
         goto kern_fail;
     }
 
-    if ((rc = kern_getsockopt(curthread, s, level, optname, 
-            optval, UIO_SYSSPACE, optlen)))
+    if ((rc = kern_getsockopt(curthread, s, level, optname,
+            optval, UIO_USERSPACE, optlen)))
+        goto kern_fail;
+
+    return (rc);
+
+kern_fail:
+    ff_os_errno(rc);
+    return (-1);
+}
+
+int
+ff_getsockopt_freebsd(int s, int level, int optname,
+    void *optval, socklen_t *optlen)
+{
+    int rc;
+
+    if ((rc = kern_getsockopt(curthread, s, level, optname,
+            optval, UIO_USERSPACE, optlen)))
         goto kern_fail;
 
     return (rc);
@@ -408,8 +498,25 @@ ff_setsockopt(int s, int level, int optname, const void *optval,
         goto kern_fail;
     }
 
-    if ((rc = kern_setsockopt(curthread, s, level, optname, 
-            __DECONST(void *, optval), UIO_SYSSPACE, optlen)))
+    if ((rc = kern_setsockopt(curthread, s, level, optname,
+            __DECONST(void *, optval), UIO_USERSPACE, optlen)))
+        goto kern_fail;
+
+    return (rc);
+
+kern_fail:
+    ff_os_errno(rc);
+    return (-1);
+}
+
+int
+ff_setsockopt_freebsd(int s, int level, int optname,
+    const void *optval, socklen_t optlen)
+{
+    int rc;
+
+    if ((rc = kern_setsockopt(curthread, s, level, optname,
+            __DECONST(void *, optval), UIO_USERSPACE, optlen)))
         goto kern_fail;
 
     return (rc);
@@ -435,8 +542,29 @@ ff_ioctl(int fd, unsigned long request, ...)
     va_start(ap, request);
 
     argp = va_arg(ap, caddr_t);
-    va_end(ap);    
+    va_end(ap);
     if ((rc = kern_ioctl(curthread, fd, req, argp)))
+        goto kern_fail;
+
+    return (rc);
+
+kern_fail:
+    ff_os_errno(rc);
+    return (-1);
+}
+
+int
+ff_ioctl_freebsd(int fd, unsigned long request, ...)
+{
+    int rc;
+    va_list ap;
+    caddr_t argp;
+
+    va_start(ap, request);
+
+    argp = va_arg(ap, caddr_t);
+    va_end(ap);
+    if ((rc = kern_ioctl(curthread, fd, request, argp)))
         goto kern_fail;
 
     return (rc);
@@ -577,8 +705,8 @@ ff_sendto(int s, const void *buf, size_t len, int flags,
     struct iovec aiov;
     int rc;
 
-    struct sockaddr bsdaddr;
-    struct sockaddr *pf = &bsdaddr;
+    struct sockaddr_storage bsdaddr;
+    struct sockaddr *pf = (struct sockaddr *)&bsdaddr;
 
     if (to) {
         linux2freebsd_sockaddr(to, tolen, pf);
@@ -608,9 +736,23 @@ ssize_t
 ff_sendmsg(int s, const struct msghdr *msg, int flags)
 {
     int rc;
+    struct sockaddr_storage freebsd_sa;
+    void *linux_sa = msg->msg_name;
 
-    if ((rc = sendit(curthread, s, __DECONST(struct msghdr *, msg), flags)))
+    if (linux_sa != NULL) {
+        linux2freebsd_sockaddr(linux_sa,
+            sizeof(struct linux_sockaddr), (struct sockaddr *)&freebsd_sa);
+        __DECONST(struct msghdr *, msg)->msg_name = &freebsd_sa;
+    }
+
+    rc = sendit(curthread, s, __DECONST(struct msghdr *, msg), flags);
+
+    __DECONST(struct msghdr *, msg)->msg_name = linux_sa;
+
+    if (rc)
         goto kern_fail;
+
+    rc = curthread->td_retval[0];
 
     return (rc);
 kern_fail:
@@ -632,7 +774,7 @@ ff_recvfrom(int s, void *buf, size_t len, int flags,
     struct msghdr msg;
     struct iovec aiov;
     int rc;
-    struct sockaddr bsdaddr;
+    struct sockaddr_storage bsdaddr;
 
     if (fromlen != NULL)
         msg.msg_namelen = *fromlen;
@@ -653,7 +795,7 @@ ff_recvfrom(int s, void *buf, size_t len, int flags,
         *fromlen = msg.msg_namelen;
 
     if (from)
-        freebsd2linux_sockaddr(from, &bsdaddr);
+        freebsd2linux_sockaddr(from, (struct sockaddr *)&bsdaddr);
 
     return (rc);
 kern_fail:
@@ -674,6 +816,8 @@ ff_recvmsg(int s, struct msghdr *msg, int flags)
         goto kern_fail;
     }
     rc = curthread->td_retval[0];
+
+    freebsd2linux_sockaddr(msg->msg_name, msg->msg_name);
 
     return (rc);
 kern_fail:
@@ -703,27 +847,13 @@ kern_fail:
 }
 
 int
-ff_socketpair(int domain, int type, int protocol, int *sv)
-{
-    int rc;
-    if ((rc = kern_socketpair(curthread, domain, type, protocol, sv)))
-        goto kern_fail;
-
-    return (rc);
-kern_fail:
-    ff_os_errno(rc);
-    return (-1);
-}
-
-int
 ff_accept(int s, struct linux_sockaddr * addr,
     socklen_t * addrlen)
 {
     int rc;
     struct file *fp;
-    struct sockaddr bsdaddr;
-    struct sockaddr *pf = &bsdaddr;
-    socklen_t socklen = sizeof(struct sockaddr);
+    struct sockaddr *pf = NULL;
+    socklen_t socklen = sizeof(struct sockaddr_storage);
 
     if ((rc = kern_accept(curthread, s, &pf, &socklen, &fp)))
         goto kern_fail;
@@ -731,14 +861,19 @@ ff_accept(int s, struct linux_sockaddr * addr,
     rc = curthread->td_retval[0];
     fdrop(fp, curthread);
 
-    if (addr)
+    if (addr && pf)
         freebsd2linux_sockaddr(addr, pf);
 
     if (addrlen)
-        *addrlen = socklen;
-
+        *addrlen = pf->sa_len;
+    
+    if(pf != NULL)
+        free(pf, M_SONAME);
     return (rc);
+    
 kern_fail:
+    if(pf != NULL)
+        free(pf, M_SONAME);
     ff_os_errno(rc);
     return (-1);
 }
@@ -764,10 +899,10 @@ int
 ff_bind(int s, const struct linux_sockaddr *addr, socklen_t addrlen)
 {
     int rc;    
-    struct sockaddr bsdaddr;
-    linux2freebsd_sockaddr(addr, addrlen, &bsdaddr);
+    struct sockaddr_storage bsdaddr;
+    linux2freebsd_sockaddr(addr, addrlen, (struct sockaddr *)&bsdaddr);
 
-    if ((rc = kern_bindat(curthread, AT_FDCWD, s, &bsdaddr)))
+    if ((rc = kern_bindat(curthread, AT_FDCWD, s, (struct sockaddr *)&bsdaddr)))
         goto kern_fail;
 
     return (rc);
@@ -780,12 +915,12 @@ int
 ff_connect(int s, const struct linux_sockaddr *name, socklen_t namelen)
 {
     int rc;
-    struct sockaddr bsdaddr;
-    linux2freebsd_sockaddr(name, namelen, &bsdaddr);
+    struct sockaddr_storage bsdaddr;
+    linux2freebsd_sockaddr(name, namelen, (struct sockaddr *)&bsdaddr);
 
-    if ((rc = kern_connectat(curthread, AT_FDCWD, s, &bsdaddr)))
+    if ((rc = kern_connectat(curthread, AT_FDCWD, s, (struct sockaddr *)&bsdaddr)))
         goto kern_fail;
-    rc = curthread->td_retval[0];
+
     return (rc);
 kern_fail:
     ff_os_errno(rc);
@@ -797,17 +932,21 @@ ff_getpeername(int s, struct linux_sockaddr * name,
     socklen_t *namelen)
 {
     int rc;
-    struct sockaddr bsdaddr;
-    struct sockaddr *pf = &bsdaddr;
+    struct sockaddr *pf = NULL;
 
     if ((rc = kern_getpeername(curthread, s, &pf, namelen)))
         goto kern_fail;
 
-    if (name)
+    if (name && pf)
         freebsd2linux_sockaddr(name, pf);
 
+    if(pf != NULL)
+        free(pf, M_SONAME);
     return (rc);
+    
 kern_fail:
+    if(pf != NULL)
+        free(pf, M_SONAME);
     ff_os_errno(rc);
     return (-1);
 }
@@ -817,18 +956,21 @@ ff_getsockname(int s, struct linux_sockaddr *name,
     socklen_t *namelen)
 {
     int rc;
-    struct sockaddr bsdaddr;
-    struct sockaddr *pf = &bsdaddr;
+    struct sockaddr *pf = NULL;
 
     if ((rc = kern_getsockname(curthread, s, &pf, namelen)))
         goto kern_fail;
 
-    if (name)
+    if (name && pf)
         freebsd2linux_sockaddr(name, pf);
 
+    if(pf != NULL)
+        free(pf, M_SONAME);
     return (rc);
 
 kern_fail:
+    if(pf != NULL)
+        free(pf, M_SONAME);
     ff_os_errno(rc);
     return (-1);
 }
@@ -925,20 +1067,30 @@ struct sys_kevent_args {
     int fd;
     const struct kevent *changelist;
     int nchanges;
-    struct kevent *eventlist;
+    void *eventlist;
     int nevents;
     const struct timespec *timeout;
+    void (*do_each)(void **, struct kevent *);
 };
 
 static int
 kevent_copyout(void *arg, struct kevent *kevp, int count)
 {
+    int i;
+    struct kevent *ke;
     struct sys_kevent_args *uap;
 
     uap = (struct sys_kevent_args *)arg;
-    bcopy(kevp, uap->eventlist, count * sizeof *kevp);
 
-    uap->eventlist += count;
+    if (!uap->do_each) {
+        bcopy(kevp, uap->eventlist, count * sizeof *kevp);
+        uap->eventlist = (void *)((struct kevent *)(uap->eventlist) + count);
+
+    } else {
+        for (ke = kevp, i = 0; i < count; i++, ke++) {
+            uap->do_each(&(uap->eventlist), ke);
+        }
+    }
 
     return (0);
 }
@@ -960,21 +1112,25 @@ kevent_copyin(void *arg, struct kevent *kevp, int count)
 }
 
 int
-ff_kevent(int kq, const struct kevent *changelist, int nchanges, 
-    struct kevent *eventlist, int nevents, const struct timespec *timeout)
+ff_kevent_do_each(int kq, const struct kevent *changelist, int nchanges, 
+    void *eventlist, int nevents, const struct timespec *timeout, 
+    void (*do_each)(void **, struct kevent *))
 {
     int rc;
     struct timespec ts;
     ts.tv_sec = 0;
     ts.tv_nsec = 0;
+
     struct sys_kevent_args ska = {
         kq,
         changelist,
         nchanges,
         eventlist,
         nevents,
-        &ts
+        &ts,
+        do_each
     };
+
     struct kevent_copyops k_ops = {
         &ska,
         kevent_copyout,
@@ -987,6 +1143,131 @@ ff_kevent(int kq, const struct kevent *changelist, int nchanges,
 
     rc = curthread->td_retval[0];
     return (rc);
+kern_fail:
+    ff_os_errno(rc);
+    return (-1);
+}
+
+int
+ff_kevent(int kq, const struct kevent *changelist, int nchanges, 
+    struct kevent *eventlist, int nevents, const struct timespec *timeout)
+{
+    return ff_kevent_do_each(kq, changelist, nchanges, eventlist, nevents, timeout, NULL);
+}
+
+int
+ff_gettimeofday(struct timeval *tv, struct timezone *tz)
+{
+    long nsec;
+    ff_get_current_time(&(tv->tv_sec), &nsec);
+    tv->tv_usec = nsec/1000;
+    return 0;
+}
+
+int
+ff_dup(int oldfd)
+{
+    int rc;
+    struct dup_args da = {
+        .fd = oldfd,
+    };
+    if ((rc = sys_dup(curthread, &da)))
+        goto kern_fail;
+
+    rc = curthread->td_retval[0];
+
+    return (rc);
+kern_fail:
+    ff_os_errno(rc);
+    return (-1);
+}
+
+int
+ff_dup2(int oldfd, int newfd)
+{
+    int rc;
+    struct dup2_args da = {
+        .from = oldfd,
+        .to = newfd
+    };
+    if ((rc = sys_dup2(curthread, &da)))
+        goto kern_fail;
+
+    rc = curthread->td_retval[0];
+
+    return (rc);
+kern_fail:
+    ff_os_errno(rc);
+    return (-1);
+}
+
+int
+ff_route_ctl(enum FF_ROUTE_CTL req, enum FF_ROUTE_FLAG flag,
+    struct linux_sockaddr *dst, struct linux_sockaddr *gw,
+    struct linux_sockaddr *netmask)
+
+{
+    struct sockaddr_storage sa_gw, sa_dst, sa_nm;
+    struct sockaddr *psa_gw, *psa_dst, *psa_nm;
+    int rtreq, rtflag;
+    int rc;
+
+    switch (req) {
+        case FF_ROUTE_ADD:
+            rtreq = RTM_ADD;
+            break;
+        case FF_ROUTE_DEL:
+            rtreq = RTM_DELETE;
+            break;
+        case FF_ROUTE_CHANGE:
+            rtreq = RTM_CHANGE;
+            break;
+        default:
+            rc = EINVAL;
+            goto kern_fail;
+    }
+
+    switch (flag) {
+        case FF_RTF_HOST:
+            rtflag = RTF_HOST;
+            break;
+        case FF_RTF_GATEWAY:
+            rtflag = RTF_GATEWAY;
+            break;
+        default:
+            rc = EINVAL;
+            goto kern_fail;
+    };
+
+    if (gw != NULL) {
+        psa_gw = (struct sockaddr *)&sa_gw;
+        linux2freebsd_sockaddr(gw, sizeof(*gw), psa_gw);
+    } else {
+        psa_gw = NULL;
+    }
+
+    if (dst != NULL) {
+        psa_dst = (struct sockaddr *)&sa_dst;
+        linux2freebsd_sockaddr(dst, sizeof(*dst), psa_dst);
+    } else {
+        psa_dst = NULL;
+    }
+
+    if (netmask != NULL) {
+        psa_nm = (struct sockaddr *)&sa_nm;
+        linux2freebsd_sockaddr(netmask, sizeof(*netmask), psa_nm);
+    } else {
+        psa_nm = NULL;
+    }
+
+    rc = rtrequest_fib(rtreq, psa_dst, psa_gw, psa_nm, rtflag,
+        NULL, RT_DEFAULT_FIB);
+
+    if (rc != 0)
+        goto kern_fail;
+
+    return (rc);
+
 kern_fail:
     ff_os_errno(rc);
     return (-1);

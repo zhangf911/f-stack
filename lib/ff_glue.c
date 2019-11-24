@@ -95,7 +95,6 @@ static MALLOC_DEFINE(M_CRED, "cred", "credentials");
 static MALLOC_DEFINE(M_PLIMIT, "plimit", "plimit structures");
 
 MALLOC_DEFINE(M_IP6OPT, "ip6opt", "IPv6 options");
-MALLOC_DEFINE(M_IP6NDP, "ip6ndp", "IPv6 Neighbor Discovery");
 
 static void configure_final(void *dummy);
 
@@ -104,15 +103,42 @@ SYSINIT(configure3, SI_SUB_CONFIGURE, SI_ORDER_ANY, configure_final, NULL);
 volatile int ticks;
 int cpu_disable_deep_sleep;
 
+static int sysctl_kern_smp_active(SYSCTL_HANDLER_ARGS);
+
 /* This is used in modules that need to work in both SMP and UP. */
 cpuset_t all_cpus;
 
-int mp_ncpus;
+int mp_ncpus = 1;
 /* export this for libkvm consumers. */
 int mp_maxcpus = MAXCPU;
 
 volatile int smp_started;
 u_int mp_maxid;
+
+static SYSCTL_NODE(_kern, OID_AUTO, smp, CTLFLAG_RD|CTLFLAG_CAPRD, NULL,
+    "Kernel SMP");
+
+SYSCTL_INT(_kern_smp, OID_AUTO, maxid, CTLFLAG_RD|CTLFLAG_CAPRD, &mp_maxid, 0,
+    "Max CPU ID.");
+
+SYSCTL_INT(_kern_smp, OID_AUTO, maxcpus, CTLFLAG_RD|CTLFLAG_CAPRD, &mp_maxcpus,
+    0, "Max number of CPUs that the system was compiled for.");
+
+SYSCTL_PROC(_kern_smp, OID_AUTO, active, CTLFLAG_RD | CTLTYPE_INT, NULL, 0,
+    sysctl_kern_smp_active, "I", "Indicates system is running in SMP mode");
+
+int smp_disabled = 0;	/* has smp been disabled? */
+SYSCTL_INT(_kern_smp, OID_AUTO, disabled, CTLFLAG_RDTUN|CTLFLAG_CAPRD,
+    &smp_disabled, 0, "SMP has been disabled from the loader");
+
+int smp_cpus = 1;	/* how many cpu's running */
+SYSCTL_INT(_kern_smp, OID_AUTO, cpus, CTLFLAG_RD|CTLFLAG_CAPRD, &smp_cpus, 0,
+    "Number of CPUs online");
+
+int smp_topology = 0;	/* Which topology we're using. */
+SYSCTL_INT(_kern_smp, OID_AUTO, topology, CTLFLAG_RDTUN, &smp_topology, 0,
+    "Topology override setting; 0 is default provided by hardware.");
+
 
 long first_page = 0;
 
@@ -138,6 +164,17 @@ int cpu_disable_c2_sleep = 0; /* Timer dies in C2. */
 int cpu_disable_c3_sleep = 0; /* Timer dies in C3. */
 
 static void timevalfix(struct timeval *);
+
+/* Extra care is taken with this sysctl because the data type is volatile */
+static int
+sysctl_kern_smp_active(SYSCTL_HANDLER_ARGS)
+{
+	int error, active;
+
+	active = smp_started;
+	error = SYSCTL_OUT(req, &active, sizeof(active));
+	return (error);
+}
 
 void
 procinit()
@@ -858,6 +895,11 @@ securelevel_gt(struct ucred *cr, int level)
     return (0);
 }
 
+int
+securelevel_ge(struct ucred *cr, int level)
+{
+        return (0);
+}
 
 /**
  * @brief Send a 'notification' to userland, using standard ways
@@ -1058,6 +1100,7 @@ foffset_lock(struct file *fp, int flags)
      */
     mtxp = mtx_pool_find(mtxpool_sleep, fp);
     mtx_lock(mtxp);
+    /*
     if ((flags & FOF_NOLOCK) == 0) {
         while (fp->f_vnread_flags & FOFFSET_LOCKED) {
             fp->f_vnread_flags |= FOFFSET_LOCK_WAITING;
@@ -1066,6 +1109,7 @@ foffset_lock(struct file *fp, int flags)
         }
         fp->f_vnread_flags |= FOFFSET_LOCKED;
     }
+    */
     res = fp->f_offset;
     mtx_unlock(mtxp);
     return (res);
@@ -1093,5 +1137,44 @@ void
 sched_unbind(struct thread* td)
 {
 
+}
+
+void
+getcredhostid(struct ucred *cred, unsigned long *hostid)
+{
+    *hostid = 0;
+}
+
+/*
+ * Check if gid is a member of the group set.
+ */
+int
+groupmember(gid_t gid, struct ucred *cred)
+{
+	int l;
+	int h;
+	int m;
+
+	if (cred->cr_groups[0] == gid)
+		return(1);
+
+	/*
+	 * If gid was not our primary group, perform a binary search
+	 * of the supplemental groups.  This is possible because we
+	 * sort the groups in crsetgroups().
+	 */
+	l = 1;
+	h = cred->cr_ngroups;
+	while (l < h) {
+		m = l + ((h - l) / 2);
+		if (cred->cr_groups[m] < gid)
+			l = m + 1; 
+		else
+			h = m; 
+	}
+	if ((l < cred->cr_ngroups) && (cred->cr_groups[l] == gid))
+		return (1);
+
+	return (0);
 }
 
